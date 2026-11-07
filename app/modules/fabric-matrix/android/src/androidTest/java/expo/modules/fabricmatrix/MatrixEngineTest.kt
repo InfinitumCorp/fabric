@@ -7,7 +7,9 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.*
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.Timeout
 import org.junit.runner.RunWith
 import org.matrix.rustcomponents.sdk.*
 import java.io.File
@@ -19,6 +21,11 @@ import java.security.KeyStore
  */
 @RunWith(AndroidJUnit4::class)
 class MatrixEngineTest {
+  companion object {
+    init { try { initPlatform(TracingConfiguration(LogLevel.DEBUG, emptyList(), emptyList(), true, null, null), false) } catch (_: Throwable) {} }
+  }
+  // Finite per-test bound so a stalled network call fails instead of hanging the run.
+  @get:Rule val timeout: Timeout = Timeout.seconds(200)
   private val args = InstrumentationRegistry.getArguments()
   private val ctx = InstrumentationRegistry.getInstrumentation().targetContext
   private val hs = args.getString("hs")!!
@@ -39,10 +46,14 @@ class MatrixEngineTest {
     // New engine instance = app restart. Restores the same device from Keystore-wrapped key + session.
     val r = engA().restore(hs)
     assertEquals(a, r)
-    // SQLCipher-encrypted files do not start with the plain SQLite header.
+    // matrix-sdk-sqlite keeps a normal SQLite file and encrypts keys/values with its StoreCipher
+    // (keyed by our Keystore-wrapped key). So check contents, not the file header: no secret appears in clear.
     val dbs = File(rootA, "matrix").walk().filter { it.isFile && it.name.endsWith(".sqlite3") }.toList()
     assertTrue("expected sqlite stores", dbs.isNotEmpty())
-    for (f in dbs) assertFalse("${f.name} is plaintext sqlite", String(f.readBytes().copyOf(15)) == "SQLite format 3")
+    val engR = engA(); engR.restore(hs)
+    val token = engR.client!!.session().accessToken.toByteArray()
+    assertFalse("access token stored in clear", allFileBytes(rootA).any { contains(it, token) })
+    assertFalse("user id stored in clear", allFileBytes(File(rootA, "matrix")).any { contains(it, a.userId.toByteArray()) })
     // No access token or password on disk in clear.
     val pw = args.getString("aPw")!!.toByteArray()
     assertFalse(allFileBytes(rootA).any { contains(it, pw) })

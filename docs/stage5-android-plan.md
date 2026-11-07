@@ -54,6 +54,14 @@ This follows the approved spec (Nexus PR 23, `2026-11-07-fabric-mobile-design.md
   - It is off by default, with no runtime switch. `SecureDefaultTest` and `contract.test.mjs` guard this.
   - It is for UI inspection only and is not distributable.
 
+## Unblock restores the encrypted timeline (2026-11-07)
+
+Block and unblock use the Matrix ignore list. In SDK `26.10.23` (`8de215a0`), `EventCache`'s `ignore_user_list_update_task` calls `clear_all_rooms()` on every ignore-list change. The open timeline then receives `TimelineDiff.Clear`. That wipe drops the in-memory copy of every event in the room, including the owner's own messages. It does not delete them on the server. Sync does not replay the cleared history. `Messenger.open` returned immediately when a timeline was already subscribed, so it never called `paginateBackwards` again, and reopening the conversation stayed empty.
+
+`Messenger` now back-paginates an open timeline after that `Clear`, including when `open` runs again once the clear has been observed. While the user is blocked, Synapse omits the ignored user's non-state events from `/messages` and `/sync`, so the peer's messages stay hidden and the owner's messages return. After unblock, the same pagination returns the previous encrypted events under the same event ids. The local store, session and identity are left in place.
+
+Regression, two real SDK clients and a throwaway GatePool pair: `app/scripts/run-gate-tests.sh BlockTimelineTest` (local Synapse; not `run-native-tests.sh`, which does not pass the pool). A native rebuild is required before the emulator UI can show it. Diagnostic screenshots still use `app/scripts/build-visual-fixture.sh`.
+
 ## Not in this stage (next gates)
 - **Recovery-key restore** (no other device available) is not built. That path currently has no way to verify the device, and the UI says so.
 - **Reporting a whole conversation** is not built; reporting single messages is.

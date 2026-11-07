@@ -1,8 +1,19 @@
 package expo.modules.fabricmatrix
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableJob
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.matrix.rustcomponents.sdk.*
 import uniffi.matrix_sdk_base.EncryptionState
 import java.util.Collections
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 class SendRefusedException(val code: String) : Exception(code)
 
@@ -18,15 +29,37 @@ data class Msg(val id: String, val mine: Boolean, val sender: String, val body: 
 class Messenger(private val client: Client) {
   val verifier = Verifier(client)
   private var sync: SyncService? = null
-  private val timelines = HashMap<String, Pair<Timeline, MutableList<TimelineItem>>>()
+  private val timelines = HashMap<String, OpenLine>()
   private val handles = ArrayList<TaskHandle>()
+  /** SDK 26.10.23 clears every room event cache when the ignore list changes and emits TimelineDiff.Clear. Sync does not put the old events back; /messages back-pagination does. */
+  private val ignoreEpoch = AtomicInteger(0)
+  private val ignoreListenerArmed = AtomicBoolean(false)
+  private var reloadParent: CompletableJob = SupervisorJob()
+  private val refillMutex = Mutex()
+
+  private class OpenLine(val timeline: Timeline, val items: MutableList<TimelineItem>) {
+    val clears = AtomicInteger(0)
+    val loadedAtClear = AtomicInteger(0)
+  }
 
   suspend fun start() {
-    if (sync == null) sync = client.syncService().finish().also { it.start() }
+    if (sync == null) {
+      if (!reloadParent.isActive) reloadParent = SupervisorJob()
+      // Subscribe before sync so the first ignore-list echo is observed.
+      handles += client.subscribeToIgnoredUsers(object : IgnoredUsersListener {
+        override fun call(ignoredUserIds: List<String>) {
+          // subscribeToIgnoredUsers invokes this once with the current list before returning.
+          if (!ignoreListenerArmed.getAndSet(true)) return
+          val epoch = ignoreEpoch.incrementAndGet()
+          CoroutineScope(reloadParent + Dispatchers.Default).launch { restoreAfterIgnore(epoch) }
+        }
+      })
+      sync = client.syncService().finish().also { it.start() }
+    }
     verifier.attachInBackground()
   }
 
-  /** Block = Matrix ignore list (server-side account data); hides the user's events. */
+  /** Block = Matrix ignore list (server-side account data). The server then omits that user's non-state events. */
   suspend fun block(userId: String) = client.ignoreUser(userId)
   suspend fun unblock(userId: String) = client.unignoreUser(userId)
   suspend fun blocked(): List<String> = client.ignoredUsers()
@@ -41,8 +74,12 @@ class Messenger(private val client: Client) {
   }
 
   suspend fun stop() {
-    handles.forEach { it.cancel() }; handles.clear(); timelines.clear()
+    ignoreEpoch.incrementAndGet()
+    reloadParent.cancel()
+    handles.forEach { it.cancel() }; handles.clear()
+    synchronized(timelines) { timelines.clear() }
     sync?.stop(); sync = null
+    ignoreListenerArmed.set(false)
   }
 
   suspend fun rooms(): List<RoomSummary> = client.rooms().mapNotNull { r ->
@@ -94,11 +131,17 @@ class Messenger(private val client: Client) {
   }
 
   suspend fun open(roomId: String) {
-    if (timelines.containsKey(roomId)) return
+    val existing = synchronized(timelines) { timelines[roomId] }
+    if (existing != null) {
+      if (existing.clears.get() != existing.loadedAtClear.get()) refill(existing)
+      return
+    }
     val t = room(roomId).timeline()
     val items: MutableList<TimelineItem> = Collections.synchronizedList(ArrayList())
+    val line = OpenLine(t, items)
     handles += t.addListener(object : TimelineListener {
       override fun onUpdate(diff: List<TimelineDiff>) = synchronized(items) {
+        var sawClear = false
         for (d in diff) when (d) {
           is TimelineDiff.Append -> items.addAll(d.values)
           is TimelineDiff.PushBack -> items.add(d.value)
@@ -109,17 +152,61 @@ class Messenger(private val client: Client) {
           is TimelineDiff.Truncate -> while (items.size > d.length.toInt()) items.removeAt(items.size - 1)
           is TimelineDiff.PopBack -> if (items.isNotEmpty()) items.removeAt(items.size - 1)
           is TimelineDiff.PopFront -> if (items.isNotEmpty()) items.removeAt(0)
-          is TimelineDiff.Clear -> items.clear()
+          is TimelineDiff.Clear -> { items.clear(); sawClear = true }
           is TimelineDiff.Reset -> { items.clear(); items.addAll(d.values) }
         }
+        // Clear is the event-cache wipe after an ignore-list change, not a deletion of history.
+        if (sawClear) line.clears.incrementAndGet()
       }
     })
-    timelines[roomId] = t to items
-    try { t.paginateBackwards(30u) } catch (_: Exception) {}
+    synchronized(timelines) { timelines[roomId] = line }
+    try {
+      t.paginateBackwards(30u)
+      if (line.clears.get() == 0) line.loadedAtClear.set(0)
+    } catch (e: CancellationException) { throw e } catch (_: Exception) {}
+    if (line.clears.get() != line.loadedAtClear.get()) refill(line)
+  }
+
+  /**
+   * After the SDK wipes open timelines for an ignore-list change, back-paginate once that Clear has landed.
+   * While the user is blocked the server omits their events; after unblock the same call returns the prior timeline.
+   */
+  private suspend fun restoreAfterIgnore(epoch: Int) {
+    val started = System.currentTimeMillis()
+    val deadline = started + 20_000
+    var lastRefill = 0L
+    while (ignoreEpoch.get() == epoch && System.currentTimeMillis() < deadline) {
+      val pending = synchronized(timelines) { timelines.values.filter { it.clears.get() != it.loadedAtClear.get() } }
+      if (pending.isNotEmpty()) {
+        for (line in pending) {
+          if (ignoreEpoch.get() != epoch) return
+          val before = line.loadedAtClear.get()
+          refill(line)
+          if (line.loadedAtClear.get() == before) delay(200)
+        }
+        lastRefill = System.currentTimeMillis()
+        continue
+      }
+      val idle = synchronized(timelines) { timelines.isEmpty() }
+      if (idle && lastRefill == 0L && System.currentTimeMillis() - started > 400) return
+      if (lastRefill != 0L && System.currentTimeMillis() - lastRefill > 1_000) return
+      delay(50)
+    }
+  }
+
+  private suspend fun refill(line: OpenLine) {
+    refillMutex.withLock {
+      val seen = line.clears.get()
+      if (line.loadedAtClear.get() == seen) return
+      try {
+        line.timeline.paginateBackwards(30u)
+        if (line.clears.get() == seen) line.loadedAtClear.set(seen)
+      } catch (e: CancellationException) { throw e } catch (_: Exception) {}
+    }
   }
 
   fun messages(roomId: String): List<Msg> {
-    val items = timelines[roomId]?.second ?: return emptyList()
+    val items = synchronized(timelines) { timelines[roomId]?.items } ?: return emptyList()
     return synchronized(items) { items.mapNotNull { it.asEvent() } }.mapNotNull { e ->
       val kind = (e.content as? TimelineItemContent.MsgLike)?.content?.kind ?: return@mapNotNull null
       val (body, utd) = when (kind) {
@@ -147,6 +234,7 @@ class Messenger(private val client: Client) {
       s.identity == "changed" -> throw SendRefusedException("identity_changed")
     }
     open(roomId)
-    timelines[roomId]!!.first.send(messageEventContentNew(MessageType.Text(TextMessageContent(text, null))))
+    synchronized(timelines) { timelines[roomId]!!.timeline }
+      .send(messageEventContentNew(MessageType.Text(TextMessageContent(text, null))))
   }
 }

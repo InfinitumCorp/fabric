@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
 import Matrix, { Message, PeerStatusNative, RoomSummary, Session, VerificationState } from './modules/fabric-matrix/src/FabricMatrixModule';
 import { isValidUserId, refusalText, sendDecision, trustLabel } from '../core/src/conversation';
@@ -33,7 +33,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!Matrix?.encryptedMessaging) { setSession(null); return; }
+    if (!Matrix?.encryptedMessaging) return;
     Matrix.restore(DEFAULT_HS).then(async (s) => { if (s) await Matrix!.startSync(); setSession(s); })
       .catch((e) => { setError(msg(e)); setSession(null); });
   }, []);
@@ -300,7 +300,7 @@ function Settings({ session, back, onLogout }: { session: Session; back: () => v
         <Text style={s.label}>Account</Text>
         <Text style={s.p}>{session.userId}</Text>
         <Text style={s.small}>This device: {session.deviceId}. {own === null ? 'Checking…' : own ? 'Verified by your account.' : 'Not verified by your account.'}</Text>
-        {own === false ? <Text style={s.small}>Until another of your signed-in devices verifies this one, you cannot verify contacts here. Your account's identity is never reset by this app.</Text> : null}
+        {own === false ? <Text style={s.small}>Until another of your signed-in devices verifies this one, you cannot verify contacts here. Your account&apos;s identity is never reset by this app.</Text> : null}
         <VerificationPanel v={v} run={run} start={own === false ? () => Matrix!.verifyOwnDevice() : null} startLabel="Verify with another device" />
         {blocked.length ? (<><Text style={s.label}>Blocked</Text>{blocked.map((u) => (
           <View key={u} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}><Text style={s.muted}>{u}</Text><Link label="Unblock" onPress={() => run(() => Matrix!.unblock(u))} /></View>))}</>) : null}

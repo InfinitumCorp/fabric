@@ -45,7 +45,9 @@ class MatrixEngine(private val root: File, alias: String = "fabric_store_wrap") 
     val key = vault.loadStoreKey()
     val s = vault.loadSession() ?: return null
     val j = JSONObject(String(s))
-    val c = build(homeserver, key)
+    // A phone may use a different server from the emulator default passed by JS.
+    // Restore the client against the server stored with the encrypted session.
+    val c = build(j.getString("h"), key)
     c.restoreSession(
       Session(
         accessToken = j.getString("a"), refreshToken = null, userId = j.getString("u"),

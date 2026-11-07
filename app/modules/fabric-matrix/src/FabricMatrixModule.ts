@@ -7,7 +7,7 @@ export type VerificationState = { phase: 'idle' | 'requested' | 'incoming' | 'ac
 export type Message = { id: string; mine: boolean; sender: string; body: string | null; utd: boolean; state: 'sending' | 'sent' | 'failed'; ts: number };
 
 /** Native Matrix bridge. Keys and access tokens stay native; errors arrive as codes only. */
-declare class FabricMatrixModule extends NativeModule<{}> {
+declare class FabricMatrixModule extends NativeModule<Record<string, never>> {
   encryptedMessaging: boolean;
   deviceVerification: boolean;
   /** True only in the compile-time diagnostic screenshot build. */

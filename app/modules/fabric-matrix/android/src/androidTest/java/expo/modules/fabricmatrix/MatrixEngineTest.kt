@@ -44,7 +44,8 @@ class MatrixEngineTest {
     val a = engA().login(hs, args.getString("aUser")!!, args.getString("aPw")!!)
     assertTrue(a.userId.startsWith("@"))
     // New engine instance = app restart. Restores the same device from Keystore-wrapped key + session.
-    val r = engA().restore(hs)
+    // Restart with the UI's stale/default address: the encrypted session owns the server choice.
+    val r = engA().restore("https://unused.invalid")
     assertEquals(a, r)
     // matrix-sdk-sqlite keeps a normal SQLite file and encrypts keys/values with its StoreCipher
     // (keyed by our Keystore-wrapped key). So check contents, not the file header: no secret appears in clear.

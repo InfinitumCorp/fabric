@@ -23,8 +23,10 @@ class VerificationTest {
   private val args = InstrumentationRegistry.getArguments()
   private val dir = InstrumentationRegistry.getInstrumentation().targetContext.noBackupFilesDir
   private val hs = args.getString("hs")!!
-  private val ea = MatrixEngine(File(dir, "v-alice"), "v_alice_wrap")
-  private val eb = MatrixEngine(File(dir, "v-bob"), "v_bob_wrap")
+  private val pair = GatePool.nextPair()
+  private val cred = mapOf("oUser" to pair.first.user, "oPw" to pair.first.password, "pUser" to pair.second.user, "pPw" to pair.second.password)
+  private val ea = MatrixEngine(File(dir, "v-${pair.first.user}-a"), "v_${pair.first.user}_a_wrap")
+  private val eb = MatrixEngine(File(dir, "v-${pair.first.user}-b"), "v_${pair.first.user}_b_wrap")
 
   @After fun clean() = runBlocking { ea.logoutAndWipe(); eb.logoutAndWipe() }
 
@@ -32,8 +34,8 @@ class VerificationTest {
     try { withTimeout(ms) { while (!f()) delay(300) } } catch (e: Exception) { fail("timeout: $what") }
 
   private suspend fun setup(): Triple<Messenger, Messenger, String> {
-    ea.login(hs, args.getString("oUser")!!, args.getString("oPw")!!)
-    eb.login(hs, args.getString("pUser")!!, args.getString("pPw")!!)
+    ea.login(hs, cred.getValue("oUser"), cred.getValue("oPw"))
+    eb.login(hs, cred.getValue("pUser"), cred.getValue("pPw"))
     // Fresh throwaway users per run (run-gate-tests.sh): these are each account's first device, so the
     // normal first sign-in creates the identity. No reset here.
     val a = ea.messenger!!; val b = eb.messenger!!; a.start(); b.start()
@@ -80,12 +82,12 @@ class VerificationTest {
     until(30_000, "verified") { a.peerStatus(room).identity == "verified" }
 
     // Restore in a fresh engine instance (app restart): verification state comes from the encrypted crypto store.
-    a.stop(); val ea2 = MatrixEngine(File(dir, "v-alice"), "v_alice_wrap"); ea2.restore(hs)
+    a.stop(); val ea2 = MatrixEngine(File(dir, "v-${pair.first.user}-a"), "v_${pair.first.user}_a_wrap"); ea2.restore(hs)
     val a2 = ea2.messenger!!; a2.start()
     until(30_000, "verified after restore") { a2.peerStatus(room).identity == "verified" }
 
     // B resets its cryptographic identity (what a reinstall or compromised account looks like to A).
-    resetOwn(eb, args.getString("pPw")!!)
+    resetOwn(eb, cred.getValue("pPw"))
     until(90_000, "violation") { a2.peerStatus(room).identity == "changed" }
     try { a2.send(room, "must-not-send"); fail("sent despite identity change") } catch (e: SendRefusedException) { assertEquals("identity_changed", e.code) }
     a2.acknowledgeIdentityChange(room)

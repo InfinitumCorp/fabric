@@ -27,8 +27,10 @@ class SelfVerificationTest {
   private val args = InstrumentationRegistry.getArguments()
   private val dir = InstrumentationRegistry.getInstrumentation().targetContext.noBackupFilesDir
   private val hs = args.getString("hs")!!
+  private val pair = GatePool.nextPair()
+  private val cred = mapOf("oUser" to pair.first.user, "oPw" to pair.first.password, "pUser" to pair.second.user, "pPw" to pair.second.password)
   private val engines = ArrayList<MatrixEngine>()
-  private fun engine(n: String) = MatrixEngine(File(dir, "sv-$n"), "sv_${n}_wrap").also { engines += it }
+  private fun engine(n: String) = MatrixEngine(File(dir, "sv-${pair.first.user}-$n"), "sv_${pair.first.user}_${n}_wrap").also { engines += it }
 
   @After fun clean() = runBlocking { engines.forEach { it.logoutAndWipe() } }
 
@@ -36,7 +38,7 @@ class SelfVerificationTest {
     try { withTimeout(ms) { while (!f()) delay(300) } } catch (e: Exception) { fail("timeout: $what") }
 
   private suspend fun signIn(e: MatrixEngine, u: String, pw: String): Messenger {
-    e.login(hs, args.getString(u)!!, args.getString(pw)!!); return e.messenger!!.also { it.start() }
+    e.login(hs, cred.getValue(u), cred.getValue(pw)); return e.messenger!!.also { it.start() }
   }
 
   private suspend fun toSas(newDev: Messenger, trusted: Messenger) {
@@ -65,7 +67,7 @@ class SelfVerificationTest {
     until(60_000, "app device verified") { app.verifier.ownDeviceVerified() }
 
     // Restart of the app device: trust comes back from the encrypted crypto store.
-    app.stop(); val again = MatrixEngine(File(dir, "sv-app"), "sv_app_wrap"); again.restore(hs)
+    app.stop(); val again = MatrixEngine(File(dir, "sv-${pair.first.user}-app"), "sv_${pair.first.user}_app_wrap"); again.restore(hs)
     val app2 = again.messenger!!; app2.start()
     until(30_000, "verified after restore") { app2.verifier.ownDeviceVerified() }
 

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
-import Matrix, { Message, PeerStatusNative, RoomSummary, Session } from './modules/fabric-matrix/src/FabricMatrixModule';
+import { Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
+import Matrix, { Message, PeerStatusNative, RoomSummary, Session, VerificationState } from './modules/fabric-matrix/src/FabricMatrixModule';
 import { isValidUserId, refusalText, sendDecision, trustLabel } from '../core/src/conversation';
 
 const C = { paper: '#ffffff', ink: '#111820', muted: '#52606b', line: '#d6dce1', accent: '#2454dd', danger: '#a3261b' };
@@ -14,11 +14,15 @@ const ERR: Record<string, string> = {
   bad_input: 'That user id is not valid. Use @name:server.',
   create_failed: 'Could not start the conversation.',
   send_failed: 'Message not sent.',
+  own_device_unverified: 'This device is not verified by your own account yet, so it cannot verify others. Sign in on a new account or verify this device first (not available in this version).',
+  verify_failed: 'Verification could not continue.',
+  report_failed: 'Report not sent.',
+  block_failed: 'Could not update the block list.',
   ...refusalText,
 };
 const msg = (e: unknown) => ERR[(e as { code?: string })?.code ?? ''] ?? 'Something went wrong.';
 
-type Route = { name: 'list' } | { name: 'new' } | { name: 'chat'; room: RoomSummary } | { name: 'settings' };
+type Route = { name: 'list' } | { name: 'new' } | { name: 'chat'; room: RoomSummary } | { name: 'contact'; room: RoomSummary } | { name: 'settings' };
 
 export default function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
@@ -36,9 +40,10 @@ export default function App() {
   if (!Matrix?.encryptedMessaging) body = <Unavailable />;
   else if (session === undefined) body = <Center text="Opening…" />;
   else if (!session) body = <SignIn hs={hs} setHs={setHs} error={error} onDone={(s) => { setError(null); setSession(s); setRoute({ name: 'list' }); }} />;
+  else if (route.name === 'contact') body = <Contact room={route.room} back={() => setRoute({ name: 'chat', room: route.room })} />;
   else if (route.name === 'list') body = <ChatList go={setRoute} />;
   else if (route.name === 'new') body = <NewChat go={setRoute} />;
-  else if (route.name === 'chat') body = <Conversation room={route.room} back={() => setRoute({ name: 'list' })} />;
+  else if (route.name === 'chat') { const room = route.room; body = <Conversation room={room} back={() => setRoute({ name: 'list' })} details={() => setRoute({ name: 'contact', room })} />; }
   else body = <Settings session={session} back={() => setRoute({ name: 'list' })} onLogout={() => setSession(null)} />;
 
   return (
@@ -74,34 +79,26 @@ function Unavailable() {
 }
 
 function SignIn({ hs, setHs, error, onDone }: { hs: string; setHs: (v: string) => void; error: string | null; onDone: (s: Session) => void }) {
-  const [user, setUser] = useState('');
-  const pw = useRef('');
-  const input = useRef<React.ComponentRef<typeof TextInput>>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(error);
-  const submit = async () => {
+  // User name and password are entered on a native screen; JavaScript never receives them.
+  const open = async () => {
     setBusy(true); setErr(null);
     try {
-      const s = await Matrix!.login(hs.trim(), user.trim(), pw.current);
-      await Matrix!.startSync();
-      onDone(s);
-    } catch (e) { setErr(msg(e)); }
-    finally { pw.current = ''; input.current?.clear(); setBusy(false); }
+      const s = await Matrix!.signIn(hs.trim());
+      if (s) { await Matrix!.startSync(); onDone(s); }
+    } catch (e) { setErr(msg(e)); } finally { setBusy(false); }
   };
   return (
-    <KeyboardAvoidingView style={s.pad} behavior="padding">
+    <View style={s.pad}>
       <Text style={s.brand}>FabriC++</Text>
       <Text style={s.p}>Private, end-to-end encrypted messages.</Text>
       <Text style={s.label}>Server</Text>
       <TextInput style={s.input} value={hs} onChangeText={setHs} autoCapitalize="none" autoCorrect={false} />
-      <Text style={s.label}>User name</Text>
-      <TextInput style={s.input} value={user} onChangeText={setUser} autoCapitalize="none" autoCorrect={false} testID="user" />
-      <Text style={s.label}>Password</Text>
-      <TextInput ref={input} style={s.input} secureTextEntry onChangeText={(v) => { pw.current = v; }} autoCapitalize="none" testID="password" />
       {err ? <Text style={s.error}>{err}</Text> : null}
-      <Button label={busy ? 'Signing in…' : 'Sign in'} onPress={submit} disabled={busy || !user} />
+      <Button label={busy ? 'Signing in…' : 'Sign in'} onPress={open} disabled={busy || !hs} />
       <Text style={s.small}>New accounts are created by the server administrator. Registration is closed.</Text>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -154,7 +151,7 @@ function NewChat({ go }: { go: (r: Route) => void }) {
   );
 }
 
-function Conversation({ room, back }: { room: RoomSummary; back: () => void }) {
+function Conversation({ room, back, details }: { room: RoomSummary; back: () => void; details: () => void }) {
   const [msgs, setMsgs] = useState<Message[]>([]);
   const [status, setStatus] = useState<PeerStatusNative | null>(null);
   const [text, setText] = useState('');
@@ -180,20 +177,20 @@ function Conversation({ room, back }: { room: RoomSummary; back: () => void }) {
   const ack = async () => { try { await Matrix!.acknowledgeIdentityChange(room.roomId); } catch (e) { setErr(msg(e)); } };
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
-      <Header title={room.name} left={['Back', back]} />
+      <Header title={room.name} left={['Back', back]} right={['Details', details]} />
       <View style={s.banner}>
         <Text style={s.small}>
           {status?.encrypted ? 'End-to-end encrypted. ' : ''}{status ? trustLabel(status.identity) : 'Checking…'}
-          {Matrix!.deviceVerification ? '' : '. Device verification is not available in this version yet.'}
+          {Matrix!.deviceVerification ? '' : '. Device verification is not available in this build.'}
         </Text>
         {status?.identity === 'changed' ? <Link label="Acknowledge identity change" onPress={ack} /> : null}
       </View>
       <FlatList style={{ flex: 1 }} contentContainerStyle={s.padH} data={msgs} keyExtractor={(m) => m.id}
         renderItem={({ item }) => (
-          <View style={[s.msg, item.mine ? s.mine : null]}>
+          <Pressable onLongPress={() => !item.mine && item.id.startsWith('$') && confirmReport(room.roomId, item.id, setErr)} style={[s.msg, item.mine ? s.mine : null]}>
             <Text style={item.utd ? s.muted : s.msgText}>{item.utd ? 'Unable to decrypt' : item.body}</Text>
             {item.mine && item.state !== 'sent' ? <Text style={item.state === 'failed' ? s.error : s.small}>{item.state === 'failed' ? 'Failed' : 'Sending…'}</Text> : null}
-          </View>
+          </Pressable>
         )} />
       {err ? <Text style={[s.error, s.padH]}>{err}</Text> : null}
       {!decision.ok ? <Text style={[s.small, s.padH]}>{refusalText[decision.reason]}</Text> : null}
@@ -202,6 +199,73 @@ function Conversation({ room, back }: { room: RoomSummary; back: () => void }) {
         <Link label="Send" onPress={send} />
       </View>
     </KeyboardAvoidingView>
+  );
+}
+
+// Reporting is opt-in per message and discloses exactly what is sent. Message text is never uploaded by the app.
+function confirmReport(roomId: string, eventId: string, setErr: (v: string | null) => void) {
+  Alert.alert('Report this message?',
+    'Sends to your server administrators: the message id, the conversation id, your user id and the reason "Abuse". ' +
+    'The app does not send the message text. The server already stores this message only in encrypted form.',
+    [{ text: 'Cancel', style: 'cancel' },
+     { text: 'Report', style: 'destructive', onPress: () => { Matrix!.report(roomId, eventId, 'Abuse').then(() => Alert.alert('Reported')).catch((e) => setErr(msg(e))); } }]);
+}
+
+function Contact({ room, back }: { room: RoomSummary; back: () => void }) {
+  const [st, setSt] = useState<PeerStatusNative | null>(null);
+  const [v, setV] = useState<VerificationState | null>(null);
+  const [blocked, setBlocked] = useState<string[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    const tick = async () => {
+      try {
+        const [a, b, c] = await Promise.all([Matrix!.peerStatus(room.roomId), Matrix!.verificationState(), Matrix!.blocked()]);
+        if (live) { setSt(a); setV(b); setBlocked(c); }
+      } catch (e) { if (live) setErr(msg(e)); }
+    };
+    tick(); const t = setInterval(tick, 1000);
+    return () => { live = false; clearInterval(t); };
+  }, [room.roomId]);
+  const run = (f: () => Promise<void>) => { setErr(null); f().catch((e) => setErr(msg(e))); };
+  const peer = st?.peer ?? null;
+  const isBlocked = !!peer && blocked.includes(peer);
+  const phase = v?.phase ?? 'idle';
+  return (
+    <View style={{ flex: 1 }}>
+      <Header title="Contact" left={['Back', back]} />
+      <View style={s.pad}>
+        <Text style={s.p}>{peer ?? 'Unknown contact'}</Text>
+        <Text style={s.small}>{st ? trustLabel(st.identity) : 'Checking…'}</Text>
+        <View style={s.rule} />
+        <Text style={s.label}>Verification</Text>
+        {!Matrix!.deviceVerification ? <Text style={s.p}>Not available in this build.</Text>
+          : phase === 'sas' ? (<>
+            <Text style={s.p}>Check that {v?.other ?? 'the other person'} sees the same emoji, in the same order.</Text>
+            <View style={s.emojiRow}>{v!.emojis.map((e, i) => (<View key={i} style={s.emoji}><Text style={{ fontSize: 28 }}>{e.symbol}</Text><Text style={s.small}>{e.description}</Text></View>))}</View>
+            <Button label="They match" onPress={() => run(() => Matrix!.verifyConfirm())} />
+            <Link label="They don't match" onPress={() => run(() => Matrix!.verifyMismatch())} />
+          </>) : phase === 'incoming' ? (<>
+            <Text style={s.p}>{v?.other} wants to verify with you.</Text>
+            <Button label="Start" onPress={() => run(() => Matrix!.verifyAccept())} />
+            <Link label="Decline" onPress={() => run(() => Matrix!.verifyCancel())} />
+          </>) : phase === 'requested' || phase === 'accepted' ? (<>
+            <Text style={s.p}>Waiting for the other device…</Text>
+            <Link label="Cancel" onPress={() => run(() => Matrix!.verifyCancel())} />
+          </>) : phase === 'done' || phase === 'cancelled' || phase === 'failed' ? (<>
+            <Text style={s.p}>{phase === 'done' ? 'Verified.' : phase === 'cancelled' ? 'Verification cancelled. Nothing was marked as verified.' : 'Verification failed. Nothing was marked as verified.'}</Text>
+            <Link label="OK" onPress={() => run(() => Matrix!.verifyReset())} />
+          </>) : (
+            <Button label="Verify with emoji" disabled={!peer || st?.identity === 'verified'} onPress={() => run(() => Matrix!.verifyUser(peer!))} />
+          )}
+        <View style={s.rule} />
+        <Text style={s.label}>Block</Text>
+        <Text style={s.small}>Blocking adds this user to your ignore list on your server. You stop seeing their messages and invites.</Text>
+        <Button label={isBlocked ? 'Unblock' : 'Block'} disabled={!peer} onPress={() => run(() => (isBlocked ? Matrix!.unblock(peer!) : Matrix!.block(peer!)))} />
+        <Text style={s.small}>To report a message, press and hold it in the conversation.</Text>
+        {err ? <Text style={s.error}>{err}</Text> : null}
+      </View>
+    </View>
   );
 }
 
@@ -250,5 +314,7 @@ const s = StyleSheet.create({
   msg: { marginVertical: 6, maxWidth: '82%', alignSelf: 'flex-start', borderWidth: 1, borderColor: C.line, padding: 10 },
   mine: { alignSelf: 'flex-end', borderColor: C.accent },
   msgText: { fontFamily: FONT, fontSize: 15, color: C.ink },
+  emojiRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 8 },
+  emoji: { alignItems: 'center', width: 64 },
   composer: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderTopWidth: 1, borderTopColor: C.line },
 });

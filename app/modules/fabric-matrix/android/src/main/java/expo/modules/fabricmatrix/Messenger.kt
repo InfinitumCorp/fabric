@@ -16,11 +16,29 @@ data class Msg(val id: String, val mine: Boolean, val sender: String, val body: 
  * Sends are refused unless the room is encrypted and the peer identity is resolved and not changed.
  */
 class Messenger(private val client: Client) {
+  val verifier = Verifier(client)
   private var sync: SyncService? = null
   private val timelines = HashMap<String, Pair<Timeline, MutableList<TimelineItem>>>()
   private val handles = ArrayList<TaskHandle>()
 
-  suspend fun start() { if (sync == null) sync = client.syncService().finish().also { it.start() } }
+  suspend fun start() {
+    if (sync == null) sync = client.syncService().finish().also { it.start() }
+    try { verifier.attach() } catch (_: Exception) {}
+  }
+
+  /** Block = Matrix ignore list (server-side account data); hides the user's events. */
+  suspend fun block(userId: String) = client.ignoreUser(userId)
+  suspend fun unblock(userId: String) = client.unignoreUser(userId)
+  suspend fun blocked(): List<String> = client.ignoredUsers()
+
+  /**
+   * Report one event to the homeserver administrators. Sends only the event id, room id and the
+   * user's reason text; the server already holds the event as ciphertext. Called only after explicit consent in the UI.
+   */
+  suspend fun report(roomId: String, eventId: String, reason: String) {
+    if (!eventId.startsWith("$") || reason.length > 500) throw SendRefusedException("bad_input")
+    room(roomId).reportContent(eventId, reason.ifBlank { null })
+  }
 
   suspend fun stop() {
     handles.forEach { it.cancel() }; handles.clear(); timelines.clear()

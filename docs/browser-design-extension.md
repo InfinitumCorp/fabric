@@ -35,25 +35,54 @@ Status: design only. No browser code. Extends the approved mobile spec
 4. **No screenshot protection, no secure keyboard**; browser extensions can read the DOM.
 5. Requires a secure context (`https:` or `http://localhost`); app refuses to start otherwise (`isSecureContext`).
 
-## 3. Recommended default (Option A): session-only, nothing persisted
-- `initRustCrypto({useIndexedDB:false})` and in-memory `MemoryStore`; no localStorage/IndexedDB/cookies.
-- Each tab load = new device: login, then must verify against an existing trusted device (SAS) before
-  sending, same fail-closed rule as Android. Tab close/reload loses the session → `logout()` on unload where
-  possible; stale devices are listed in Settings for removal.
-- UX cost: reverify every visit; history before the device existed is unreadable (no backup, by spec).
-- Option B (not default; needs separate approval): persistent IndexedDB crypto store with `storagePassword`
-  entered each visit (never stored), sync cache kept in memory only, auto-lock on idle. Still exposed to XSS
-  while unlocked; passphrase is in JS.
+## 3. Storage and session options (decision required)
+Verified in 45.0.0 source: `initRustCrypto` -> `rust-crypto/index.ts:144-149` calls
+`StoreHandle.openWithKey(prefix, storeKey)` or `StoreHandle.open(prefix, storePassphrase)` (WASM-side key
+derivation, "deliberately slow"), else an unencrypted store. Restore is supported by constructing the client with
+the same `userId`/`deviceId`/`accessToken` (`client.ts:1382`, `1392`) and reopening the same store with the same
+passphrase/key. **The SDK provides no encryption for the access token**; that is the app's problem.
 
-## 4. Features (parity with Android)
-Chat list, new chat (DM), conversation with fail-closed send, contact with SAS verification
-(`requestVerificationDM`, emoji compare), own-device verification (`requestOwnUserVerification`),
-identity change banner (`needsUserApproval` → `pinCurrentUserIdentity` only after user acknowledges; never
-silent), offline/catch-up (sync resumes; queued sends not auto-resent without verified state), block/unblock
-(`setIgnoredUsers`), event report (`reportEvent`, disclosure: admins see only ciphertext of E2EE content),
-sign out (`logout` + `clearStores`). Log redaction: no tokens, passwords, keys or message bodies in console;
-SDK logger level capped and filtered. Revenue/payments: "Not connected" only; no earnings shown;
-per-user revenue authorization does not exist. No backup/recovery.
+### Option A — session-only (limited prototype only)
+`initRustCrypto({useIndexedDB:false})`, `MemoryStore`, nothing written to browser storage.
+**Major drawbacks (not a daily-use messenger):**
+- Every load creates a NEW device: device list grows, peers see new devices, each needs fresh trust.
+- History sent before that device existed cannot be decrypted (no backup/recovery by spec).
+- Closing/reloading the tab does NOT reliably log out: `beforeunload`/`pagehide` handlers may not complete,
+  so there is **no guarantee the server session/device is revoked**. Stale devices stay until removed in
+  Settings (or by an admin).
+
+### Option B — passphrase-unlocked persistent store (usable option, NOT yet approved)
+- Crypto store: IndexedDB opened with `storagePassword` = user passphrase entered each visit (never stored).
+- Sync cache: memory-only `MemoryStore` (no plaintext room/message cache on disk); history re-fetched on unlock.
+- Access token: must also be encrypted at rest. js-sdk has no supported mechanism. Possible design: WebCrypto
+  (PBKDF2/Argon2 derive -> AES-GCM wrap) — this is **custom cryptography and needs a separate review**.
+  **Unresolved gate:** until that design is reviewed, Option B cannot ship; nothing (passphrase, key,
+  token) may be persisted in plaintext.
+- While unlocked, passphrase-derived keys and token are in page memory: still fully XSS-exposed.
+- Passphrase entropy: minimum length + strength check; weak passphrases make offline guessing of a copied
+  profile feasible. Lost passphrase = local store unrecoverable: sign in as a new device, old history on
+  this browser lost, re-verify. No automatic recovery; native cross-signing/key backup stays excluded.
+- Auto-lock on idle drops keys/token from memory.
+
+### Recommendation
+Release-1 browser = **Option A as a clearly labelled limited prototype**, with explicit "Sign out" as the only
+reliable revoke. Option B becomes the daily-use target only after the token-wrapping design is reviewed and
+approved. This is a design-acceptance request, not a release-ready or complete claim.
+
+## 4. Features (parity with Android, policy per approved spec §5 and `core/src/rules.ts`)
+Send policy is the SAME as mobile (`canSend`): allowed when the room is encrypted and there is no pending
+identity change; blocked when encryption is off/unknown (`not_encrypted`, `encryption_unknown`) or a peer's
+identity changed and is not yet acknowledged (`identity_changed`). Unverified peers/devices are allowed but
+visibly marked "Not verified"; verified peers show "Verified". SAS is offered, not required to send.
+- Verification: `requestVerificationDM` (peer), `requestOwnUserVerification` (own device), emoji compare.
+- Identity change: `getUserVerificationStatus().needsUserApproval` -> banner, send blocked;
+  `pinCurrentUserIdentity` only after the user acknowledges; previously verified -> `wasCrossSigningVerified`
+  shown; never silently accepted.
+- Offline/catch-up via sync; failed sends shown "failed", retry is manual.
+- Block/unblock `setIgnoredUsers`; event report `reportEvent` with disclosure (admins see only ciphertext of
+  E2EE content); sign out `logout()` then `clearStores()`.
+- Log redaction via `core/src/redact.ts`; no tokens/passwords/keys/bodies in console.
+- Revenue: "Not connected", no earnings, per-user revenue authorization not implemented. No backup/recovery.
 
 ## 5. UI
 Same as mobile: white `#fff`, text `#111820`, blue `#2454dd`, `#d6dce1` dividers, Helvetica/Arial regular,
@@ -65,8 +94,14 @@ connect-src 'self' http://127.0.0.1:8008; object-src 'none'; base-uri 'none'; fr
 Synapse CORS limited to the dev origin. localhost only; no public deployment.
 
 ## 7. Tests
-- Unit: core reuse, CSP present, no persistent storage writes (Option A), redaction filter.
-- Cross-client real E2EE on local Synapse with throwaway users: Android SDK (instrumentation) <-> browser
-  (Playwright, headless Chromium, localhost) send/receive, SAS both directions, identity-change banner, block,
-  report reaches Synapse admin API as ciphertext event. No fake ciphertext.
-- Limits: emulator only (no physical phone); Android GUI runs pending KVM access.
+- Shell (no browser process): unit + integration with real matrix-js-sdk 45.0.0 / crypto-wasm 18.9.0 in Node
+  against local Synapse with throwaway users; in-memory DOM tests (jsdom) for screens/redaction/policy.
+- Cross-client real E2EE: Node js-sdk client <-> Android SDK instrumentation peer (real ciphertext; verify
+  event `m.room.encrypted` on Synapse, decrypt both ways, SAS, identity-change block, block, report).
+- Actual browser E2E: performed by the parent via computerUse in a real browser. No Playwright/CDP/browser
+  automation from Shell.
+- Limits: emulator only, no physical phone; Android GUI runs pending KVM access; no fake ciphertext.
+
+## 8. Status
+Draft for design acceptance. Password login in JS (§2) and the storage option (§3) need explicit user
+acceptance. No new services (MAS/OIDC) are approved or planned here.

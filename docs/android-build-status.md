@@ -21,6 +21,10 @@ or emulator; the TypeScript checks do not validate Kotlin or Matrix integration.
 
 ## Remaining blockers
 
+- Gradle completed its 32 plugin build tasks, then failed during Android project
+  configuration because NDK `27.1.12297006` was not installed and its license was
+  not present in the local SDK. No APK was produced and Kotlin application
+  compilation was not reached.
 - React Native 0.88.1 defaults to compile SDK 37 and build tools 37.0.0.
   Google's SDK catalog queried here did not provide `platforms;android-37`;
   sdkmanager reports that package missing. No framework downgrade or SDK override

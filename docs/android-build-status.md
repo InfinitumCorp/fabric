@@ -1,48 +1,46 @@
 # Android build check — 2026-11-07
 
-Source: `cursor/android-unblock-timeline-5ab2`, checked out for continued work on
-`codex/android-build`. Company rules and Nexus mobile design source were pulled
-from `InfinitumCorp/RULES` and `InfinitumCorp/infinitum-nexus`.
+Source branch: `codex/android-build`, based on
+`cursor/android-unblock-timeline-5ab2`. Company rules and Nexus mobile design
+source were pulled from `InfinitumCorp/RULES` and `InfinitumCorp/infinitum-nexus`.
 
-## Verified here
+## Build configuration
 
-- Core: 17 tests pass and TypeScript typecheck passes.
-- App: TypeScript typecheck and six bridge/security contract tests pass.
-- Added the missing Expo ESLint configuration; `npm run lint` passes. The Expo
-  lint wrapper rejects the installed ESLint 9 despite requesting it itself, so
-  the script invokes ESLint directly with the Expo configuration.
-- Expo Android prebuild succeeds with SDK 58 dependencies from the lockfile.
-- Fixed restoration after signing in to a custom homeserver: native restoration
-  now builds the client using the server in the encrypted session. The native
-  restart test supplies an unrelated UI default to exercise this case.
+- Expo 58 and React Native 0.88.1 remain pinned by the existing lockfile.
+- Compile SDK 36, target SDK 36, minimum SDK 28, build tools 37.0.0,
+  NDK 27.1.12297006, CMake 3.22.1.
+- Five Expo modules (`expo-asset`, `expo-file-system`, `expo-font`,
+  `expo-keep-awake`, `expo-status-bar`) build from their installed source through
+  Expo autolinking. Their prebuilt AARs require API 37, which was not available
+  from Google's SDK catalog queried here. AAR checks remain enabled.
+- `plugins/withAndroidAbiFilters.js` aligns APK library packaging with the
+  `reactNativeArchitectures` selection. This also excludes legacy JNA ABIs.
+  Restricting only CMake still copied all third-party ABI libraries and exhausted
+  this workspace's disk during the first packaging attempt.
+- `npm run android:apk` creates a bundled-JS, non-diagnostic ARM64 test APK.
+  `FABRIC_ANDROID_ABIS` can select other architectures when rebuilding.
 
-The native regression still needs execution against Synapse on an Android device
-or emulator; the TypeScript checks do not validate Kotlin or Matrix integration.
+## Checks
 
-## Remaining blockers
+- Release APK build succeeds: 795 Gradle tasks, 6m 37s on this workspace.
+- APK signature verifies (v2); package `com.infinitum.fabric`, version 1.0.0,
+  Android 9+ (minimum API 28), target API 36. Only ARM64 libraries are packaged,
+  and the JavaScript bundle is included.
+- APK size: 92,532,642 bytes. SHA-256:
+  `6e1d309775879ca5c1e11c0a05ff9b132807367f3d2eedc98888eb59244426c0`.
+- Core: 17 tests and TypeScript typecheck pass.
+- App: lint, TypeScript typecheck and six bridge/security contract tests pass.
+- Expo Android prebuild succeeds.
+- Native restoration uses the server stored in the encrypted session rather
+  than the UI's emulator default. The native restart test supplies an unrelated
+  UI address to cover this regression. That instrumented test still needs a
+  running Synapse and Android device/emulator; static checks do not validate it.
 
-- Gradle completed its 32 plugin build tasks, then failed during Android project
-  configuration because NDK `27.1.12297006` was not installed and its license was
-  not present in the local SDK. No APK was produced and Kotlin application
-  compilation was not reached.
-- React Native 0.88.1 defaults to compile SDK 37 and build tools 37.0.0.
-  Google's SDK catalog queried here did not provide `platforms;android-37`;
-  sdkmanager reports that package missing. No framework downgrade or SDK override
-  has been applied.
-- The app's default server `http://10.0.2.2:8008` is emulator-only. The checked-in
-  Synapse compose setup is explicitly development-only. Nexus identifies
-  `infinitumfabric.app` as the product domain but does not establish a deployed
-  Matrix service. Probes for Matrix discovery and client versions at that domain
-  and client versions at `matrix.infinitumfabric.app` received proxy CONNECT 403;
-  this does not prove the remote services are down.
-- No phone is connected to this workspace. No phone installation or two-device
-  verification has been performed.
-- Plan/earnings integration and recovery-key restore remain unimplemented on
-  this Android branch. See `stage5-android-plan.md` for the existing release gates.
+## Rebuild
 
-No production deployment, DNS change, live charge or payout was performed.
-
-## Repeat the checks
+Install JDK 17 (used by native module toolchains), JDK 21 (Gradle), Android command
+line tools and the packages above. Accept Android SDK licenses with sdkmanager.
+Point `ANDROID_HOME` at the SDK. Then:
 
 ```sh
 cd core
@@ -51,14 +49,28 @@ npm test
 npm run typecheck
 cd ../app
 npm ci
+npm run lint
 npx tsc --noEmit
 node scripts/contract.test.mjs
-npm run lint
-npx expo prebuild --platform android --no-install
-# Requires the SDK versions selected by the installed React Native release:
-cd android
-NODE_ENV=production ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
+npm run android:apk
 ```
 
-The generated release build uses the template debug signing key. It is for
-private testing; store distribution needs separate release signing.
+Output: `app/android/app/build/outputs/apk/release/app-release.apk`.
+The generated release variant uses the Expo template's debug signing key for
+private testing. Store distribution needs separate release signing. The app
+bundles its JavaScript and does not need Metro on the phone.
+
+## Still required for live use
+
+- The checked-in default server `http://10.0.2.2:8008` is emulator-only. The
+  Synapse compose setup is explicitly development-only. Nexus names
+  `infinitumfabric.app` as the product domain but does not establish a deployed
+  Matrix service. Probes for Matrix discovery/client versions on that domain
+  and client versions on `matrix.infinitumfabric.app` received proxy CONNECT 403.
+  This does not prove the remote service is down. The server field remains
+  editable at sign-in.
+- Phone installation and two-device encrypted messaging verification.
+- Plan/earnings integration and recovery-key restoration remain unimplemented
+  on this Android branch. See `stage5-android-plan.md` for the existing gates.
+
+No production deployment, DNS change, live charge or payout was performed.

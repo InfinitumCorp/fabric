@@ -21,7 +21,15 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "android:apk": "bash scripts/build-android-apk.sh"
+  },
+  "expo": {
+    "autolinking": {
+      "android": {
+        "buildFromSource": ["expo-asset", "expo-file-system", "expo-font", "expo-keep-awake", "expo-status-bar"]
+      }
+    }
   },
   "private": true
 }

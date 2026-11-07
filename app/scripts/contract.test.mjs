@@ -36,6 +36,16 @@ test('app has no password field', () => {
   assert.doesNotMatch(app, /secureTextEntry|Matrix!?\.login|password\s*[:=]/i);
 });
 
+test('android backup is fail-closed in tracked config', () => {
+  const cfg = JSON.parse(read('app.json'));
+  // Expo prebuild writes android:allowBackup from this field and defaults the omission to true.
+  assert.equal(cfg.expo.android.allowBackup, false);
+  const manifest = read('modules/fabric-matrix/android/src/main/AndroidManifest.xml');
+  assert.doesNotMatch(manifest, /android:allowBackup\s*=\s*"true"/);
+  const engines = read('modules/fabric-matrix/android/src/main/java/expo/modules/fabricmatrix/Engines.kt');
+  assert.match(engines, /noBackupFilesDir/);
+});
+
 test('screenshot exception is compile-time only and off by default', () => {
   const gradle = read('modules/fabric-matrix/android/build.gradle');
   assert.match(gradle, /findProperty\('fabricDiagnosticScreenshots'\) \?: 'false'/);

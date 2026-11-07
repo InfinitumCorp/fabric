@@ -35,3 +35,13 @@ test('native module returns only allow-listed fields to JS', () => {
 test('app has no password field', () => {
   assert.doesNotMatch(app, /secureTextEntry|Matrix!?\.login|password\s*[:=]/i);
 });
+
+test('screenshot exception is compile-time only and off by default', () => {
+  const gradle = read('modules/fabric-matrix/android/build.gradle');
+  assert.match(gradle, /findProperty\('fabricDiagnosticScreenshots'\) \?: 'false'/);
+  assert.match(kt, /if \(BuildConfig\.DIAGNOSTIC_SCREENSHOTS\) return/);
+  const signIn = read('modules/fabric-matrix/android/src/main/java/expo/modules/fabricmatrix/SignInActivity.kt');
+  assert.match(signIn, /addFlags\(WindowManager\.LayoutParams\.FLAG_SECURE\)/);
+  assert.doesNotMatch(signIn, /DIAGNOSTIC/);
+  assert.doesNotMatch(kt, /clearFlags/);
+});

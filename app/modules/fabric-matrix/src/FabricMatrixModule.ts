@@ -10,6 +10,11 @@ export type Message = { id: string; mine: boolean; sender: string; body: string 
 declare class FabricMatrixModule extends NativeModule<{}> {
   encryptedMessaging: boolean;
   deviceVerification: boolean;
+  /** True only in the compile-time diagnostic screenshot build. */
+  diagnosticBuild: boolean;
+  ownDeviceVerified(): Promise<boolean>;
+  /** Ask another signed-in, trusted device of this account to verify this one (SAS). Never resets identity. */
+  verifyOwnDevice(): Promise<void>;
   restore(hs: string): Promise<Session | null>;
   /** Opens the native sign-in screen. The password is entered and used natively; JS gets ids or null. */
   signIn(hs: string): Promise<Session | null>;

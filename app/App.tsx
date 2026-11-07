@@ -14,7 +14,9 @@ const ERR: Record<string, string> = {
   bad_input: 'That user id is not valid. Use @name:server.',
   create_failed: 'Could not start the conversation.',
   send_failed: 'Message not sent.',
-  own_device_unverified: 'This device is not verified by your own account yet, so it cannot verify others. Sign in on a new account or verify this device first (not available in this version).',
+  own_device_unverified: 'This device is not verified by your account yet. Verify it from Settings using another of your signed-in devices.',
+  already_verified: 'This device is already verified.',
+  verification_unavailable: 'Verification is not ready yet. Try again in a moment.',
   verify_failed: 'Verification could not continue.',
   report_failed: 'Report not sent.',
   block_failed: 'Could not update the block list.',
@@ -49,6 +51,7 @@ export default function App() {
   return (
     <SafeAreaView style={s.root}>
       <StatusBar barStyle="dark-content" />
+      {Matrix?.diagnosticBuild ? <Text style={s.diag}>DIAGNOSTIC BUILD. Screenshots allowed. Test data only. Not for distribution.</Text> : null}
       {body}
     </SafeAreaView>
   );
@@ -211,6 +214,31 @@ function confirmReport(roomId: string, eventId: string, setErr: (v: string | nul
      { text: 'Report', style: 'destructive', onPress: () => { Matrix!.report(roomId, eventId, 'Abuse').then(() => Alert.alert('Reported')).catch((e) => setErr(msg(e))); } }]);
 }
 
+function VerificationPanel({ v, run, start, startLabel }: { v: VerificationState | null; run: (f: () => Promise<void>) => void; start: (() => Promise<void>) | null; startLabel: string }) {
+  const phase = v?.phase ?? 'idle';
+  if (!Matrix!.deviceVerification) return <Text style={s.p}>Not available in this build.</Text>;
+  if (phase === 'sas') return (<>
+    <Text style={s.p}>Check that the other device shows the same emoji, in the same order.</Text>
+    <View style={s.emojiRow}>{v!.emojis.map((e, i) => (<View key={i} style={s.emoji}><Text style={{ fontSize: 28 }}>{e.symbol}</Text><Text style={s.small}>{e.description}</Text></View>))}</View>
+    <Button label="They match" onPress={() => run(() => Matrix!.verifyConfirm())} />
+    <Link label="They don't match" onPress={() => run(() => Matrix!.verifyMismatch())} />
+  </>);
+  if (phase === 'incoming') return (<>
+    <Text style={s.p}>{v?.other} wants to verify with you.</Text>
+    <Button label="Start" onPress={() => run(() => Matrix!.verifyAccept())} />
+    <Link label="Decline" onPress={() => run(() => Matrix!.verifyCancel())} />
+  </>);
+  if (phase === 'requested' || phase === 'accepted') return (<>
+    <Text style={s.p}>Waiting for the other device…</Text>
+    <Link label="Cancel" onPress={() => run(() => Matrix!.verifyCancel())} />
+  </>);
+  if (phase === 'done' || phase === 'cancelled' || phase === 'failed') return (<>
+    <Text style={s.p}>{phase === 'done' ? 'Verified.' : phase === 'cancelled' ? 'Verification cancelled. Nothing was marked as verified.' : 'Verification failed. Nothing was marked as verified.'}</Text>
+    <Link label="OK" onPress={() => run(() => Matrix!.verifyReset())} />
+  </>);
+  return start ? <Button label={startLabel} onPress={() => run(start)} /> : null;
+}
+
 function Contact({ room, back }: { room: RoomSummary; back: () => void }) {
   const [st, setSt] = useState<PeerStatusNative | null>(null);
   const [v, setV] = useState<VerificationState | null>(null);
@@ -230,7 +258,6 @@ function Contact({ room, back }: { room: RoomSummary; back: () => void }) {
   const run = (f: () => Promise<void>) => { setErr(null); f().catch((e) => setErr(msg(e))); };
   const peer = st?.peer ?? null;
   const isBlocked = !!peer && blocked.includes(peer);
-  const phase = v?.phase ?? 'idle';
   return (
     <View style={{ flex: 1 }}>
       <Header title="Contact" left={['Back', back]} />
@@ -239,25 +266,7 @@ function Contact({ room, back }: { room: RoomSummary; back: () => void }) {
         <Text style={s.small}>{st ? trustLabel(st.identity) : 'Checking…'}</Text>
         <View style={s.rule} />
         <Text style={s.label}>Verification</Text>
-        {!Matrix!.deviceVerification ? <Text style={s.p}>Not available in this build.</Text>
-          : phase === 'sas' ? (<>
-            <Text style={s.p}>Check that {v?.other ?? 'the other person'} sees the same emoji, in the same order.</Text>
-            <View style={s.emojiRow}>{v!.emojis.map((e, i) => (<View key={i} style={s.emoji}><Text style={{ fontSize: 28 }}>{e.symbol}</Text><Text style={s.small}>{e.description}</Text></View>))}</View>
-            <Button label="They match" onPress={() => run(() => Matrix!.verifyConfirm())} />
-            <Link label="They don't match" onPress={() => run(() => Matrix!.verifyMismatch())} />
-          </>) : phase === 'incoming' ? (<>
-            <Text style={s.p}>{v?.other} wants to verify with you.</Text>
-            <Button label="Start" onPress={() => run(() => Matrix!.verifyAccept())} />
-            <Link label="Decline" onPress={() => run(() => Matrix!.verifyCancel())} />
-          </>) : phase === 'requested' || phase === 'accepted' ? (<>
-            <Text style={s.p}>Waiting for the other device…</Text>
-            <Link label="Cancel" onPress={() => run(() => Matrix!.verifyCancel())} />
-          </>) : phase === 'done' || phase === 'cancelled' || phase === 'failed' ? (<>
-            <Text style={s.p}>{phase === 'done' ? 'Verified.' : phase === 'cancelled' ? 'Verification cancelled. Nothing was marked as verified.' : 'Verification failed. Nothing was marked as verified.'}</Text>
-            <Link label="OK" onPress={() => run(() => Matrix!.verifyReset())} />
-          </>) : (
-            <Button label="Verify with emoji" disabled={!peer || st?.identity === 'verified'} onPress={() => run(() => Matrix!.verifyUser(peer!))} />
-          )}
+        <VerificationPanel v={v} run={run} start={peer && st?.identity !== 'verified' ? () => Matrix!.verifyUser(peer) : null} startLabel="Verify with emoji" />
         <View style={s.rule} />
         <Text style={s.label}>Block</Text>
         <Text style={s.small}>Blocking adds this user to your ignore list on your server. You stop seeing their messages and invites.</Text>
@@ -271,6 +280,18 @@ function Contact({ room, back }: { room: RoomSummary; back: () => void }) {
 
 function Settings({ session, back, onLogout }: { session: Session; back: () => void; onLogout: () => void }) {
   const [busy, setBusy] = useState(false);
+  const [own, setOwn] = useState<boolean | null>(null);
+  const [v, setV] = useState<VerificationState | null>(null);
+  const [blocked, setBlocked] = useState<string[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    const tick = () => Promise.all([Matrix!.ownDeviceVerified(), Matrix!.verificationState(), Matrix!.blocked()])
+      .then(([o, vv, b]) => { if (live) { setOwn(o); setV(vv); setBlocked(b); } }).catch((e) => live && setErr(msg(e)));
+    tick(); const t = setInterval(tick, 1000);
+    return () => { live = false; clearInterval(t); };
+  }, []);
+  const run = (f: () => Promise<void>) => { setErr(null); f().catch((e) => setErr(msg(e))); };
   const logout = async () => { setBusy(true); try { await Matrix!.logoutAndWipe(); } finally { setBusy(false); onLogout(); } };
   return (
     <View style={{ flex: 1 }}>
@@ -278,7 +299,12 @@ function Settings({ session, back, onLogout }: { session: Session; back: () => v
       <View style={s.pad}>
         <Text style={s.label}>Account</Text>
         <Text style={s.p}>{session.userId}</Text>
-        <Text style={s.small}>This device: {session.deviceId}</Text>
+        <Text style={s.small}>This device: {session.deviceId}. {own === null ? 'Checking…' : own ? 'Verified by your account.' : 'Not verified by your account.'}</Text>
+        {own === false ? <Text style={s.small}>Until another of your signed-in devices verifies this one, you cannot verify contacts here. Your account's identity is never reset by this app.</Text> : null}
+        <VerificationPanel v={v} run={run} start={own === false ? () => Matrix!.verifyOwnDevice() : null} startLabel="Verify with another device" />
+        {blocked.length ? (<><Text style={s.label}>Blocked</Text>{blocked.map((u) => (
+          <View key={u} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}><Text style={s.muted}>{u}</Text><Link label="Unblock" onPress={() => run(() => Matrix!.unblock(u))} /></View>))}</>) : null}
+        {err ? <Text style={s.error}>{err}</Text> : null}
         <View style={s.rule} />
         <Text style={s.label}>Plan</Text>
         <Text style={s.p}>Not connected. Plans and upgrades are not available in this build. Personal messaging is free.</Text>
@@ -314,6 +340,7 @@ const s = StyleSheet.create({
   msg: { marginVertical: 6, maxWidth: '82%', alignSelf: 'flex-start', borderWidth: 1, borderColor: C.line, padding: 10 },
   mine: { alignSelf: 'flex-end', borderColor: C.accent },
   msgText: { fontFamily: FONT, fontSize: 15, color: C.ink },
+  diag: { backgroundColor: '#a3261b', color: '#ffffff', fontSize: 12, padding: 6, textAlign: 'center' },
   emojiRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 8 },
   emoji: { alignItems: 'center', width: 64 },
   composer: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderTopWidth: 1, borderTopColor: C.line },

@@ -14,6 +14,8 @@ import org.junit.runner.RunWith
 import org.matrix.rustcomponents.sdk.*
 import java.io.File
 
+/** Peer SAS verification, mismatch, persistence and identity-change refusal. Only the identity-change step resets
+ *  the PEER's identity, on purpose, to simulate a changed contact. */
 /** SAS verification, mismatch, persistence and identity-change refusal with two real SDK clients. */
 @RunWith(AndroidJUnit4::class)
 class VerificationTest {
@@ -30,11 +32,10 @@ class VerificationTest {
     try { withTimeout(ms) { while (!f()) delay(300) } } catch (e: Exception) { fail("timeout: $what") }
 
   private suspend fun setup(): Triple<Messenger, Messenger, String> {
-    ea.login(hs, args.getString("aUser")!!, args.getString("aPw")!!)
-    eb.login(hs, args.getString("bUser")!!, args.getString("bPw")!!)
-    // Test accounts already own identities from earlier runs, so each fresh test device takes a new identity
-    // (password UIAA) to hold the private cross-signing keys that signing a peer needs.
-    resetOwn(ea, args.getString("aPw")!!); resetOwn(eb, args.getString("bPw")!!)
+    ea.login(hs, args.getString("oUser")!!, args.getString("oPw")!!)
+    eb.login(hs, args.getString("pUser")!!, args.getString("pPw")!!)
+    // Fresh throwaway users per run (run-gate-tests.sh): these are each account's first device, so the
+    // normal first sign-in creates the identity. No reset here.
     val a = ea.messenger!!; val b = eb.messenger!!; a.start(); b.start()
     until(30_000, "own devices verified") { a.verifier.ownDeviceVerified() && b.verifier.ownDeviceVerified() }
     val bId = eb.client!!.userId()
@@ -84,7 +85,7 @@ class VerificationTest {
     until(30_000, "verified after restore") { a2.peerStatus(room).identity == "verified" }
 
     // B resets its cryptographic identity (what a reinstall or compromised account looks like to A).
-    resetOwn(eb, args.getString("bPw")!!)
+    resetOwn(eb, args.getString("pPw")!!)
     until(90_000, "violation") { a2.peerStatus(room).identity == "changed" }
     try { a2.send(room, "must-not-send"); fail("sent despite identity change") } catch (e: SendRefusedException) { assertEquals("identity_changed", e.code) }
     a2.acknowledgeIdentityChange(room)

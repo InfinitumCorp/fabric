@@ -23,7 +23,7 @@ class Messenger(private val client: Client) {
 
   suspend fun start() {
     if (sync == null) sync = client.syncService().finish().also { it.start() }
-    try { verifier.attach() } catch (_: Exception) {}
+    verifier.attachInBackground()
   }
 
   /** Block = Matrix ignore list (server-side account data); hides the user's events. */

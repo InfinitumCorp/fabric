@@ -48,6 +48,22 @@ class Verifier(private val client: Client) {
     ctl = c
   }
 
+  /**
+   * The SDK only hands out the controller once this account's identity has been fetched by sync
+   * ("Failed retrieving user identity" before that). Retry for a bounded time; incoming requests are
+   * only seen after this succeeds, so Messenger.start() calls it in the background.
+   */
+  suspend fun ensureAttached(timeoutMs: Long = 60_000) {
+    val end = System.currentTimeMillis() + timeoutMs
+    while (true) {
+      try { attach(); return } catch (e: Exception) {
+        if (System.currentTimeMillis() > end) throw SendRefusedException("verification_unavailable")
+        kotlinx.coroutines.delay(1000)
+      }
+    }
+  }
+  fun attachInBackground() { scope.launch { try { ensureAttached() } catch (_: Exception) {} } }
+
   private fun c() = ctl ?: throw SendRefusedException("verification_unavailable")
   /** False when this device is not cross-signed by its own identity (e.g. new sign-in on an account that already
    *  had one). The SDK cannot sign other users then, so verification is refused instead of failing half-way. */
@@ -55,7 +71,16 @@ class Verifier(private val client: Client) {
 
   suspend fun requestUser(userId: String) {
     if (!ownDeviceVerified()) throw SendRefusedException("own_device_unverified")
-    attach(); state = State("requested", userId, emptyList()); c().requestUserVerification(userId) }
+    ensureAttached(); state = State("requested", userId, emptyList()); c().requestUserVerification(userId) }
+  /**
+   * New sign-in on an account that already has an identity: ask one of the user's other, already trusted
+   * devices to verify this one by SAS. Never resets the identity.
+   */
+  suspend fun requestOwnDevice() {
+    if (ownDeviceVerified()) throw SendRefusedException("already_verified")
+    ensureAttached(); state = State("requested", client.userId(), emptyList()); c().requestDeviceVerification()
+  }
+
   suspend fun acceptIncoming() { if (!ownDeviceVerified()) throw SendRefusedException("own_device_unverified"); if (state.phase != "incoming") throw SendRefusedException("no_request"); c().acceptVerificationRequest() }
   /** User confirmed the emojis match on both devices. */
   suspend fun confirmMatch() { if (state.phase != "sas") throw SendRefusedException("no_sas"); c().approveVerification() }

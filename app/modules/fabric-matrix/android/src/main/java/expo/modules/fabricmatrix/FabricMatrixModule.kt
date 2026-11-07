@@ -37,6 +37,8 @@ class FabricMatrixModule : Module() {
     // True only because SAS verification is exercised against a real second SDK client (VerificationTest).
     Constant("deviceVerification") { true }
 
+    // Compile-time only (see build.gradle). Production builds: false.
+    Constant("diagnosticBuild") { BuildConfig.DIAGNOSTIC_SCREENSHOTS }
     OnCreate { setSecure() }
     OnActivityEntersForeground { setSecure() }
 
@@ -66,6 +68,8 @@ class FabricMatrixModule : Module() {
     AsyncFunction("blocked") Coroutine { -> guarded("block_failed") { m().blocked() } }
     AsyncFunction("report") Coroutine { roomId: String, eventId: String, reason: String -> guarded("report_failed") { m().report(roomId, eventId, reason) } }
     AsyncFunction("verificationState") Coroutine { -> guarded("verify_failed") { m().verifier.state.let { mapOf("phase" to it.phase, "other" to it.other, "emojis" to it.emojis.map { (s, d) -> mapOf("symbol" to s, "description" to d) }) } } }
+    AsyncFunction("ownDeviceVerified") Coroutine { -> guarded("verify_failed") { m().verifier.ownDeviceVerified() } }
+    AsyncFunction("verifyOwnDevice") Coroutine { -> guarded("verify_failed") { m().verifier.requestOwnDevice() } }
     AsyncFunction("verifyUser") Coroutine { userId: String -> guarded("verify_failed") { m().verifier.requestUser(userId) } }
     AsyncFunction("verifyAccept") Coroutine { -> guarded("verify_failed") { m().verifier.acceptIncoming() } }
     AsyncFunction("verifyConfirm") Coroutine { -> guarded("verify_failed") { m().verifier.confirmMatch() } }
@@ -76,6 +80,7 @@ class FabricMatrixModule : Module() {
 
   // Spec section 6: message screens are FLAG_SECURE (no screenshots, blank recents preview).
   private fun setSecure() {
+    if (BuildConfig.DIAGNOSTIC_SCREENSHOTS) return
     appContext.currentActivity?.let { a -> a.runOnUiThread { a.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE) } }
   }
 }

@@ -40,7 +40,7 @@ class MatrixEngineTest {
 
   private fun allFileBytes(root: File) = root.walk().filter { it.isFile }.map { it.readBytes() }
 
-  @Test fun loginRestoreWipe_andStoreIsNotPlainSqlite() = runBlocking {
+  @Test fun loginRestoreWipe_noSecretsInClearOnDisk() = runBlocking {
     val a = engA().login(hs, args.getString("aUser")!!, args.getString("aPw")!!)
     assertTrue(a.userId.startsWith("@"))
     // New engine instance = app restart. Restores the same device from Keystore-wrapped key + session.

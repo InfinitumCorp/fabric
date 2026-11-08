@@ -9,6 +9,7 @@ import {
   linkConfirmCode, newLinkNonce, LINK_NONCE_RE,
 } from '/shared/devices.js';
 import { qrMatrix } from '/shared/qr.js';
+import { startHandleDisplay } from '/handle-display.js';
 import { linkChannelKey, sealJson, openJson, newRecoveryKey, parseRecoveryKey, sealBackup, openBackup } from '/shared/channel.js';
 import { Vault, MIN_PASSPHRASE } from '/shared/vault.js';
 import { idbBackend } from '/idb.js';
@@ -502,7 +503,7 @@ function systemLine(peer, text) {
 
 async function addContact(raw) {
   const h = normalizeHandle(raw);
-  if (!isValidHandle(h)) throw new Error('Use letters, numbers or _ (2–24), like @alex.veil');
+  if (!isValidHandle(h)) throw new Error('Use letters, numbers or _ (2–24), like +alex.veil');
   if (h === db.handle) throw new Error("That's you.");
   if (!db.contacts[h]?.list) await refreshContact(h, { force: true }).catch(() => { throw new Error(`${h} is not on FabriC++ yet.`); });
   openThread(h);
@@ -929,12 +930,12 @@ function renderContacts() {
   if (!handles.length && !showArchived) {
     const hint = q
       ? (isValidHandle(normalizeHandle(q)) ? `No chats match. Press + to start a chat with ${normalizeHandle(q)}.` : 'No chats match.')
-      : 'No chats yet. Type an address like @alex above and press +.';
+      : 'No chats yet. Type an address like +alex above and press +.';
     ul.append(el('li', 'contacts-empty', hint));
   }
   renderSearchHits(q);
 }
-const searchQuery = () => ($('add-handle')?.value || '').trim().toLowerCase().replace(/^@$/, '');
+const searchQuery = () => ($('add-handle')?.value || '').trim().toLowerCase().replace(/^[+]/, '@').replace(/^@$/, '');
 
 /** Messages matching the search box, across every chat on this device. */
 function renderSearchHits(q) {
@@ -2020,7 +2021,7 @@ function openPicker(title, onPick) {
   const ul = $('pick-list');
   ul.replaceChildren();
   const hs = Object.keys(db.contacts).filter((h) => db.contacts[h].list && !db.contacts[h].pendingAccount && !db.contacts[h].viaGroup).sort((a, b) => lastTs(b) - lastTs(a));
-  if (!hs.length) ul.append(el('li', 'contacts-empty', 'No contacts yet. Start a chat with someone by their @name first.'));
+  if (!hs.length) ul.append(el('li', 'contacts-empty', 'No contacts yet. Start a chat with someone by their +name first.'));
   for (const h of hs) {
     const b = el('button', 'fwd-to');
     b.type = 'button';
@@ -2922,7 +2923,7 @@ $('add-handle').oninput = () => { $('add-error').textContent = ''; renderContact
 $('new-chat').onclick = () => {
   if (active) closeThread(); else switchTab('chats');
   const i = $('add-handle');
-  if (!i.value.startsWith('@')) i.value = '@';
+  if (!/^[+@]/.test(i.value)) i.value = '+';
   i.focus();
 };
 $('thread-menu-btn').onclick = (e) => {
@@ -3068,4 +3069,5 @@ const growText = () => {
 $('text').addEventListener('input', growText);
 $('composer').addEventListener('submit', () => setTimeout(growText));
 
+startHandleDisplay();
 boot();

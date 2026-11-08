@@ -12,7 +12,8 @@ export const HANDLE_RE = /^@[a-z0-9_]{2,24}\.veil$/;
 
 export function normalizeHandle(input) {
   let h = String(input || '').trim().toLowerCase();
-  if (!h.startsWith('@')) h = '@' + h;
+  h = h.replace(/^[+@]/, ''); // people type +name (how the app shows handles); accounts are @name underneath
+  h = '@' + h;
   if (!h.endsWith('.veil')) h = h + '.veil';
   return h;
 }

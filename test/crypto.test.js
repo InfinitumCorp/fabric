@@ -16,6 +16,7 @@ test('safety numbers match on both sides and change when either account key chan
 test('handles normalize to @name.veil', () => {
   assert.equal(normalizeHandle('Alex'), '@alex.veil');
   assert.equal(normalizeHandle('@alex.veil'), '@alex.veil');
+  assert.equal(normalizeHandle('+Alex.veil'), '@alex.veil', 'the + people see and type maps to the same account');
   assert.ok(isValidHandle('@alex_01.veil'));
   assert.ok(!isValidHandle('@a.veil'));
   assert.ok(!isValidHandle('@al ex.veil'));

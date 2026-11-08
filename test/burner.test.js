@@ -68,7 +68,7 @@ test('relay: burner numbers lent from the pool, routed, rotated and burned', asy
     sent.push({ url, init });
     return new Response(JSON.stringify({ sid: 'SM' + '2'.repeat(32) }), { status: 201 });
   };
-  const phone = { ...CFG, burner: { pool: ['+15550003001', '+15550003002'], cooldownMs: 60_000, checkoutUrl: 'https://pay.example.test/fabric' } };
+  const phone = { ...CFG, burner: { enabled: true, pool: ['+15550003001', '+15550003002'], cooldownMs: 60_000, checkoutUrl: 'https://pay.example.test/fabric' } };
   const relay = await createRelay({ port: 0, dataFile: null, log: () => {}, phone, fetchImpl, operatorToken: 'op' });
   t.after(() => relay.close());
   const { port } = relay;

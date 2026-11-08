@@ -140,7 +140,8 @@ test('relay: a number per account; calls, voicemail and texts reach its devices'
 
   const st0 = await ana.ask({ type: 'phone_status' }, 'phone_status');
   assert.deepEqual({ enabled: st0.enabled, number: st0.number, countries: st0.countries }, { enabled: true, number: null, countries: ['+1'] });
-  assert.deepEqual({ lines: st0.burners.lines, slots: st0.burners.slots }, { lines: [], slots: 0 });
+  assert.equal('burners' in st0, false, 'burner numbers are off unless FABRIC_BURNERS=1');
+  await assert.rejects(ana.ask({ type: 'burner_create' }, 'burner_created'), /not available/);
   await assert.rejects(ana.ask({ type: 'phone_token' }, 'phone_token'), /no phone number/);
 
   // the operator assigns a number; only known accounts can get one

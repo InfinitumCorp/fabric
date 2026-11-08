@@ -233,7 +233,7 @@
             <li><button type="button" data-go="security" data-focus="dev-card"><span>Linked devices</span><small>Phones and computers on this account</small></button></li>
             <li><button type="button" data-go="security" data-focus="backup-card"><span>Chat backup</span><small>Encrypted backup and restore</small></button></li>
             <li><button type="button" data-go="security" data-focus="ai-card"><span>Translation and on-device AI</span><small>Translate, summaries, suggested replies</small></button></li>
-            <li><button type="button" data-go="phone"><span>Phone numbers</span><small>Your number, burner numbers, call and text log</small></button></li>
+            <li><button type="button" data-go="phone"><span>Phone numbers</span><small>Your number, call and text log</small></button></li>
             <li><button type="button" data-go="earn"><span>Earn</span><small>Opt-in research, payouts, receipts</small></button></li>
           </ul>
           <p class="muted small settings-about">FabriC++™ by Infinitum Corporation. Messages and calls are end-to-end encrypted; the relay can't read them.</p>
@@ -271,25 +271,6 @@
               <div class="row"><button id="phone-sms" class="ghost" type="button">Send text</button></div>
               <p id="phone-line-note" class="muted small"></p>
               <p id="phone-note" class="muted small" role="status"></p>
-            </div>
-            <div id="burner-card" class="card wide">
-              <h3>Burner numbers</h3>
-              <p class="muted small">A burner stands in for you. People you call or text from it see only the burner, never your main number. <strong>Rotate</strong> swaps it for a fresh number; <strong>Burn</strong> drops it for good: it stops ringing at once, and its calls and texts are deleted from the relay. Each conversation keeps the number you picked for it.</p>
-              <p class="muted small">What stays private: labels, and which number you use with whom, are kept in your encrypted vault on this device. Infinitum can't read your FabriC++ chats or your contacts. Burner calls and texts still go over the ordinary phone network, like everything in this tab, so the carrier (Twilio) handles them in the clear, and the relay keeps their history for up to 30 days to sync your devices, or until you burn the number.</p>
-              <p id="burner-slots" class="small"></p>
-              <ul id="burner-list" class="burner-list"></ul>
-              <div class="row">
-                <button id="burner-new" class="primary" type="button">New burner number</button>
-                <button id="burner-shop-toggle" class="ghost" type="button">Add numbers</button>
-              </div>
-              <div id="burner-shop" class="burner-shop hidden">
-                <div class="row burner-period" role="radiogroup" aria-label="Billing">
-                  <label><input type="radio" name="burner-period" value="month" checked /> Monthly</label>
-                  <label><input type="radio" name="burner-period" value="year" /> Yearly</label>
-                </div>
-                <div id="burner-offers" class="burner-offers"></div>
-                <p id="burner-buy-note" class="muted small"></p>
-              </div>
             </div>
             <div class="card wide">
               <h3>History</h3>
@@ -529,7 +510,7 @@
     <button type="button" class="sheet-item" data-new="voice"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a1 1 0 01-1 1A16 16 0 014 5a1 1 0 011-1z"/></svg></span><span><strong>Voice call</strong><small>End-to-end encrypted</small></span></button>
     <button type="button" class="sheet-item" data-new="video"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12"/><path d="M16 10l5-3v10l-5-3"/></svg></span><span><strong>Video call</strong><small>End-to-end encrypted</small></span></button>
     <button type="button" class="sheet-item" data-new="group"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 19c0-3 3-5 6-5s6 2 6 5M16 5a3 3 0 010 6M18 14c2 .6 3 2.4 3 5"/></svg></span><span><strong>New group</strong><small>Up to 64 people</small></span></button>
-    <button type="button" class="sheet-item" data-new="phone"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2" width="10" height="20"/><path d="M11 18h2"/></svg></span><span><strong>Call a phone number</strong><small>Your FABRIC number or a burner</small></span></button>
+    <button type="button" class="sheet-item" data-new="phone"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2" width="10" height="20"/><path d="M11 18h2"/></svg></span><span><strong>Call a phone number</strong><small>From your FABRIC number</small></span></button>
     <div class="sheet-sep" aria-hidden="true"></div>
     <button type="button" class="sheet-item" data-new="calls"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span><span><strong>Recent calls</strong><small>Call history</small></span></button>
     <button type="button" class="sheet-item" data-new="settings"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></span><span><strong>Settings</strong><small>Account, devices, privacy, appearance</small></span></button>

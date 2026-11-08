@@ -15,7 +15,8 @@
 // Optional:
 //   FABRIC_PHONE_COUNTRIES        allowed calling-code prefixes for outgoing calls/texts (default +1)
 //   FABRIC_PHONE_NUMBERS          JSON {"+15551234567": "@ana.veil"} assigned at start
-// Burner numbers (add-on; see shared/burner.js):
+// Burner numbers (add-on, off until FABRIC_BURNERS=1; see shared/burner.js):
+//   FABRIC_BURNERS                1 turns burner numbers on (they are out of the app for now)
 //   FABRIC_BURNER_POOL            comma-separated numbers bought for lending out as burners
 //   FABRIC_BURNER_COOLDOWN_DAYS   how long a burned number rests before anyone else gets it (default 90)
 //   FABRIC_BURNER_CHECKOUT_URL    https page where people buy bundles (shown in the app)
@@ -46,6 +47,7 @@ export function phoneFromEnv(env = process.env) {
     countries: (env.FABRIC_PHONE_COUNTRIES || '+1').split(',').map((s) => s.trim()).filter(Boolean),
     numbers: {},
     burner: {
+      enabled: env.FABRIC_BURNERS === '1',
       pool: (env.FABRIC_BURNER_POOL || '').split(',').map((s) => s.trim()).filter((n) => E164_RE.test(n)),
       cooldownMs: Math.max(0, Number(env.FABRIC_BURNER_COOLDOWN_DAYS ?? 90) || 0) * 86_400_000,
       checkoutUrl: /^https:\/\/[^\s"<>]+$/.test(env.FABRIC_BURNER_CHECKOUT_URL || '') ? env.FABRIC_BURNER_CHECKOUT_URL : null,
@@ -117,8 +119,8 @@ export function createPhone({ cfg, store, notify, log = console.log, fetchImpl =
   for (const [number, handle] of Object.entries(cfg.numbers || {})) {
     if (E164_RE.test(number) && isValidHandle(handle)) store.assignNumber(number, handle);
   }
-  const burnerCfg = { pool: [], cooldownMs: 90 * 86_400_000, checkoutUrl: null, ...cfg.burner };
-  for (const n of burnerCfg.pool) store.addToPool(n);
+  const burnerCfg = { enabled: false, pool: [], cooldownMs: 90 * 86_400_000, checkoutUrl: null, ...cfg.burner };
+  if (burnerCfg.enabled) for (const n of burnerCfg.pool) store.addToPool(n);
   const buckets = {
     token: new Buckets(10, 10 / 60),        // access tokens per device
     call: new Buckets(10, 30 / 3600),       // outgoing calls per account: 10 at once, 30 an hour
@@ -131,16 +133,18 @@ export function createPhone({ cfg, store, notify, log = console.log, fetchImpl =
   function status(handle) {
     return {
       type: 'phone_status', enabled: true, number: store.numberOf(handle), countries: cfg.countries,
-      burners: {
-        lines: store.burnerLines(handle), slots: store.burnerSlots(handle), bundles: store.burnerBundles(handle),
-        available: store.poolHasFree(), checkoutUrl: burnerCfg.checkoutUrl, bundleSizes: BUNDLES,
-      },
+      ...(burnerCfg.enabled ? {
+        burners: {
+          lines: store.burnerLines(handle), slots: store.burnerSlots(handle), bundles: store.burnerBundles(handle),
+          available: store.poolHasFree(), checkoutUrl: burnerCfg.checkoutUrl, bundleSizes: BUNDLES,
+        },
+      } : {}),
     };
   }
   const pushStatus = (handle) => notify(handle, status(handle));
   /** The number an account calls or texts from: a burner it owns, or its main number. */
-  const fromNumber = (handle, via) => (via ? (store.ownsLine(handle, via) ? via : null) : store.numberOf(handle));
-  const canCall = (handle) => Boolean(store.numberOf(handle) || store.burnerLines(handle).length);
+  const fromNumber = (handle, via) => (via ? (burnerCfg.enabled && store.ownsLine(handle, via) ? via : null) : store.numberOf(handle));
+  const canCall = (handle) => Boolean(store.numberOf(handle) || (burnerCfg.enabled && store.burnerLines(handle).length));
   const burnNow = (handle, number) => store.burnLine(handle, number, Date.now() + burnerCfg.cooldownMs);
   const auth = 'Basic ' + Buffer.from(`${cfg.apiKey}:${cfg.apiSecret}`).toString('base64');
 
@@ -280,6 +284,7 @@ export function createPhone({ cfg, store, notify, log = console.log, fetchImpl =
       }
       // ----- burner numbers -----
       case 'burner_create': {
+        if (!burnerCfg.enabled) return fail('burner numbers are not available');
         if (store.burnerLines(me.handle).length >= store.burnerSlots(me.handle)) return fail('no free burner slots: add a bundle first');
         if (!store.poolHasFree()) return fail('no numbers are free right now; try again later');
         if (buckets.burner.take(me.handle)) return fail('too many new numbers today');
@@ -289,12 +294,14 @@ export function createPhone({ cfg, store, notify, log = console.log, fetchImpl =
         return reply({ ...status(me.handle), type: 'burner_created', line: number });
       }
       case 'burner_burn': {
+        if (!burnerCfg.enabled) return fail('burner numbers are not available');
         const number = String(msg.number || '');
         if (!burnNow(me.handle, number)) return fail('that number is not one of your burners');
         pushStatus(me.handle);
         return reply({ ...status(me.handle), type: 'burner_burned', line: number });
       }
       case 'burner_rotate': {
+        if (!burnerCfg.enabled) return fail('burner numbers are not available');
         // a fresh number in place of this one, in one step: the old one only goes if a new one comes
         const old = String(msg.number || '');
         if (!store.ownsLine(me.handle, old)) return fail('that number is not one of your burners');
@@ -332,5 +339,5 @@ export function createPhone({ cfg, store, notify, log = console.log, fetchImpl =
     return { id, handle, size, period, expiresAt: until };
   }
 
-  return { http, ws, expire, grant, status, pushStatus };
+  return { http, ws, expire, grant, status, pushStatus, burnersEnabled: burnerCfg.enabled };
 }

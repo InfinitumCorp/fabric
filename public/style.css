@@ -258,26 +258,6 @@ canvas.qr { display: block; width: 232px; height: 232px; margin: 10px 0; image-r
 .cid-button:hover { background: var(--ink); color: var(--on-ink); }
 #backup-reuse { min-width: 300px; flex: 1; }
 
-/* burner numbers */
-.phone-from { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.phone-from select { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid var(--line, #ccc); border-radius: 8px; background: transparent; color: inherit; font: inherit; }
-.burner-list { list-style: none; margin: 8px 0; padding: 0; }
-.burner-item { display: grid; grid-template-columns: auto 1fr auto auto; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line, #ddd); }
-.burner-item.burning { opacity: 0.6; }
-.burner-number { font-variant-numeric: tabular-nums; font-weight: 500; }
-.burner-label { min-width: 0; padding: 6px 8px; border: 1px solid var(--line, #ccc); border-radius: 8px; background: transparent; color: inherit; font: inherit; }
-.burner-actions { display: flex; gap: 6px; }
-.burner-shop { margin-top: 12px; }
-.burner-period { gap: 16px; margin-bottom: 8px; }
-.burner-offers { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
-.burner-offer { display: flex; flex-direction: column; gap: 4px; padding: 12px; border: 1px solid var(--line, #ddd); border-radius: 10px; }
-.burner-offer .button { margin-top: 6px; text-align: center; text-decoration: none; }
-@media (max-width: 640px) {
-  .burner-item { grid-template-columns: 1fr auto; }
-  .burner-label { grid-column: 1 / -1; }
-}
-.burner-period label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
-.burner-period input { width: auto; margin: 0; }
 
 /* ---------- messenger shell (v0.16): list / conversation screens, icons, search, menus ---------- */
 .icon-btn { display: inline-grid; place-items: center; width: 40px; height: 40px; padding: 0; background: none; border: 1px solid transparent; border-radius: 0; color: var(--text); cursor: pointer; flex: none; }

@@ -357,7 +357,7 @@ export async function createRelay({
       if (url.pathname === '/api/phone/pool') {
         // operator: numbers bought to lend out as burners
         if (!isOperator(req)) return json(403, { error: 'operator only' });
-        if (!phoneSvc) return json(404, { error: 'phone not configured' });
+        if (!phoneSvc?.burnersEnabled) return json(404, { error: 'burner numbers are off' });
         if (req.method === 'POST') {
           const { add = [], remove = [] } = await readJson(req);
           if (!Array.isArray(add) || !Array.isArray(remove) || add.length + remove.length > 500) return json(400, { error: 'add and remove are lists of numbers' });
@@ -372,7 +372,7 @@ export async function createRelay({
       if (url.pathname === '/api/phone/bundles' && req.method === 'POST') {
         // operator: someone bought a burner bundle (payment is handled outside the relay)
         if (!isOperator(req)) return json(403, { error: 'operator only' });
-        if (!phoneSvc) return json(404, { error: 'phone not configured' });
+        if (!phoneSvc?.burnersEnabled) return json(404, { error: 'burner numbers are off' });
         const { handle, size, period, id, expiresAt } = await readJson(req);
         if (!(isValidHandle(handle) && store.getList(handle))) return json(400, { error: 'unknown handle' });
         if (id !== undefined && !/^[A-Za-z0-9_-]{1,64}$/.test(String(id))) return json(400, { error: 'id: up to 64 letters, digits, - or _' });

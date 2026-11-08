@@ -1,10 +1,9 @@
 // FABRIC Phone: calls and texts with ordinary phone numbers, through the relay's Twilio account.
 // Not end-to-end encrypted (the phone network can't be); the UI says so next to every action.
 
-import { reconcile, rotate as rotateRecord, burn as burnRecord, lineFor } from '../shared/burner.js';
+import { reconcile, lineFor } from '../shared/burner.js';
 
 const $ = (id) => document.getElementById(id);
-const BURN_UNDO_MS = 5000;
 const E164 = /^\+[1-9]\d{6,14}$/;
 const TOKEN_REFRESH_MS = 50 * 60_000; // tokens last an hour
 
@@ -40,7 +39,6 @@ export function createPhone({ request, inCall = () => false, vault = null }) {
   const local = { records: [], byPeer: {} };
   const book = () => { const b = vault?.get() || local; b.records ??= []; b.byPeer ??= {}; return b; };
   const save = () => vault?.save();
-  const burning = new Map(); // number → timer (the few seconds you can still undo a burn)
   let status = null;     // { enabled, number, countries }
   let device = null;     // Twilio.Device
   let tokenTimer = null;
@@ -50,7 +48,7 @@ export function createPhone({ request, inCall = () => false, vault = null }) {
   const events = new Map(); // seq → event
 
   // ---------- which number ----------
-  const activeBurners = () => book().records.filter((r) => r.state === 'active' && r.network === 'pstn' && !burning.has(r.number));
+  const activeBurners = () => book().records.filter((r) => r.state === 'active' && r.network === 'pstn');
   const recordOf = (number) => book().records.find((r) => r.state === 'active' && r.number === number);
   const nameOf = (r) => (r.label ? `${r.label} (${formatNumber(r.number)})` : `Burner ${formatNumber(r.number)}`);
   /** The number a conversation uses: null is your main number. */
@@ -58,7 +56,7 @@ export function createPhone({ request, inCall = () => false, vault = null }) {
     const choice = book().byPeer[peer];
     if (choice === 'main' && status?.number) return null;
     const r = lineFor(book().records, book().byPeer, peer);
-    if (r && !burning.has(r.number)) return r.number;
+    if (r) return r.number;
     if (status?.number) return null;
     return activeBurners()[0]?.number || null; // no main number: a burner is the only way out
   }
@@ -251,13 +249,12 @@ export function createPhone({ request, inCall = () => false, vault = null }) {
     $('phone-number').textContent = status.number ? formatNumber(status.number) : 'No number yet';
     $('phone-number-note').textContent = status.number
       ? 'People can call and text you here. Missed calls go to voicemail.'
-      : activeBurners().length ? 'You call and text from your burner numbers.' : 'Ask the relay operator to assign you one of their numbers, or add a burner number.';
+      : 'Ask the relay operator to assign you one of their numbers.';
     for (const id of ['phone-call', 'phone-sms']) $(id).disabled = !canPhone();
-    renderBurners();
     renderFrom();
   }
 
-  // ---------- burner numbers ----------
+  // ---------- which number a conversation uses ----------
   const peerOfInput = () => toE164($('phone-to').value, status?.countries?.[0] || '+1');
 
   /** The From list follows the number typed in: each conversation keeps its own line. */
@@ -284,165 +281,8 @@ export function createPhone({ request, inCall = () => false, vault = null }) {
     const r = number && recordOf(number);
     book().byPeer[peer] = r ? r.id : 'main';
     save();
-    renderBurners();
     renderFrom();
   }
-
-  async function newBurner() {
-    $('burner-new').disabled = true;
-    try {
-      const r = await request({ type: 'burner_create' });
-      onStatus(r);
-      note(`New burner number: ${formatNumber(r.line)}`);
-    } catch (e) {
-      note(`No new number: ${e.message}`);
-    } finally {
-      renderBurners();
-    }
-  }
-
-  async function rotateLine(number) {
-    try {
-      const r = await request({ type: 'burner_rotate', number });
-      const b = book();
-      const old = recordOf(number);
-      if (old) {
-        const [burned, fresh] = rotateRecord(old, r.line);
-        b.records = b.records.map((x) => (x.id === old.id ? burned : x)).concat(fresh);
-        for (const [peer, id] of Object.entries(b.byPeer)) if (id === old.id) b.byPeer[peer] = fresh.id; // same conversations, new number
-        save();
-      }
-      onStatus(r);
-      note(`${formatNumber(number)} is burned; your new number is ${formatNumber(r.line)}.`);
-    } catch (e) {
-      note(`Could not rotate: ${e.message}`);
-    }
-  }
-
-  /** One tap burns, after a few seconds in which Undo still keeps it. */
-  function burnLine(number) {
-    if (burning.has(number)) return;
-    burning.set(number, setTimeout(async () => {
-      try {
-        const r = await request({ type: 'burner_burn', number });
-        const b = book();
-        b.records = b.records.map((x) => (x.number === number && x.state === 'active' ? burnRecord(x) : x));
-        save();
-        burning.delete(number);
-        onStatus(r);
-        note(`${formatNumber(number)} is burned.`);
-      } catch (e) {
-        burning.delete(number);
-        note(`Could not burn ${formatNumber(number)}: ${e.message}`);
-        render();
-      }
-    }, BURN_UNDO_MS));
-    render();
-  }
-
-  function undoBurn(number) {
-    clearTimeout(burning.get(number));
-    burning.delete(number);
-    note(`${formatNumber(number)} kept.`);
-    render();
-  }
-
-  function renderBurners() {
-    const b = status?.burners;
-    $('burner-card').classList.toggle('hidden', !b);
-    if (!b) return;
-    const used = b.lines.length;
-    const ends = b.bundles.length ? new Date(Math.max(...b.bundles.map((x) => x.expiresAt))).toLocaleDateString() : null;
-    $('burner-slots').textContent = b.slots
-      ? `${used} of ${b.slots} burner number${b.slots === 1 ? '' : 's'} in use${ends ? ` · paid until ${ends}` : ''}`
-      : 'No burner numbers on this account yet. They come in bundles of 1, 2 or 5.';
-    const ul = $('burner-list');
-    ul.replaceChildren();
-    for (const line of b.lines) {
-      const r = recordOf(line.number);
-      const li = document.createElement('li');
-      li.className = 'burner-item';
-      const num = document.createElement('span');
-      num.className = 'burner-number';
-      num.textContent = formatNumber(line.number);
-      const label = document.createElement('input');
-      label.className = 'burner-label';
-      label.maxLength = 40;
-      label.placeholder = 'Label (only on your devices)';
-      label.value = r?.label || '';
-      label.setAttribute('aria-label', `Label for ${formatNumber(line.number)}`);
-      label.onchange = () => { if (r) { r.label = label.value.replace(/[\u0000-\u001f\u007f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').trim().slice(0, 40); save(); renderFrom(); } };
-      const uses = Object.values(book().byPeer).filter((id) => r && id === r.id).length;
-      const meta = document.createElement('span');
-      meta.className = 'muted small';
-      meta.textContent = uses ? `${uses} conversation${uses === 1 ? '' : 's'}` : 'Not used yet';
-      const actions = document.createElement('span');
-      actions.className = 'burner-actions';
-      if (burning.has(line.number)) {
-        li.classList.add('burning');
-        meta.textContent = 'Burning…';
-        const u = document.createElement('button');
-        u.className = 'ghost'; u.type = 'button'; u.textContent = 'Undo';
-        u.onclick = () => undoBurn(line.number);
-        actions.append(u);
-      } else {
-        const rot = document.createElement('button');
-        rot.className = 'ghost'; rot.type = 'button'; rot.textContent = 'Rotate';
-        rot.title = 'Swap for a fresh number; this one is burned';
-        rot.disabled = !b.available;
-        rot.onclick = () => rotateLine(line.number);
-        const burnBtn = document.createElement('button');
-        burnBtn.className = 'danger'; burnBtn.type = 'button'; burnBtn.textContent = 'Burn';
-        burnBtn.onclick = () => burnLine(line.number);
-        actions.append(rot, burnBtn);
-      }
-      li.append(num, label, meta, actions);
-      ul.append(li);
-    }
-    const free = b.slots - used;
-    $('burner-new').classList.toggle('hidden', !b.slots);
-    $('burner-new').disabled = free <= 0 || !b.available;
-    $('burner-new').title = free <= 0 ? 'Every number in your bundle is in use' : !b.available ? 'No numbers are free on this relay right now' : '';
-    const shop = $('burner-shop');
-    if (!b.slots) shop.classList.remove('hidden');
-    $('burner-shop-toggle').classList.toggle('hidden', !b.slots);
-    renderOffers();
-  }
-
-  function renderOffers() {
-    const b = status?.burners;
-    if (!b) return;
-    const period = document.querySelector('input[name="burner-period"]:checked')?.value || 'month';
-    const box = $('burner-offers');
-    box.replaceChildren();
-    for (const size of b.bundleSizes) {
-      const card = document.createElement('div');
-      card.className = 'burner-offer';
-      const h = document.createElement('strong');
-      h.textContent = `${size} number${size === 1 ? '' : 's'}`;
-      const sub = document.createElement('div');
-      sub.className = 'muted small';
-      sub.textContent = period === 'year' ? 'Renews yearly' : 'Renews monthly';
-      card.append(h, sub);
-      if (b.checkoutUrl) {
-        const a = document.createElement('a');
-        a.className = 'button primary';
-        a.textContent = 'Get';
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
-        const u = new URL(b.checkoutUrl);
-        u.searchParams.set('bundle', String(size));
-        u.searchParams.set('period', period);
-        a.href = u.href;
-        card.append(a);
-      }
-      box.append(card);
-    }
-    $('burner-buy-note').textContent = b.checkoutUrl
-      ? 'This opens in a new tab. Your numbers appear here once the bundle is added. Cancel anytime: numbers stay until the end of the period.'
-      : 'Bundles are added to your FabriC++ plan by the relay operator. Ask them for one.';
-  }
-
 
   function label(e) {
     const base = baseLabel(e);
@@ -517,9 +357,6 @@ export function createPhone({ request, inCall = () => false, vault = null }) {
   $('phone-dial').onsubmit = (e) => { e.preventDefault(); dial($('phone-to').value); };
   $('phone-to').addEventListener('input', () => renderFrom());
   $('phone-from').onchange = (e) => chooseLine(e.target.value);
-  $('burner-new').onclick = () => newBurner();
-  $('burner-shop-toggle').onclick = () => $('burner-shop').classList.toggle('hidden');
-  for (const r of document.querySelectorAll('input[name="burner-period"]')) r.onchange = () => renderOffers();
   $('phone-sms').onclick = () => sendText($('phone-to').value, $('phone-text').value);
   $('phone-answer').onclick = () => {
     if (!incoming) return;
@@ -538,7 +375,6 @@ export function createPhone({ request, inCall = () => false, vault = null }) {
   addEventListener('pagehide', () => {
     active?.disconnect();
     device?.destroy();
-    for (const [number, t] of burning) { clearTimeout(t); request({ type: 'burner_burn', number }).catch(() => {}); } // leaving doesn't undo
   });
 
   return {

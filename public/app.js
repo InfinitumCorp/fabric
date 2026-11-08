@@ -19,6 +19,7 @@ import { TRANSLATION_LANGS } from '/shared/models.js';
 import { createCalls } from '/calls.js';
 import { createPhone } from '/phone.js';
 import { seal, peekSealed, openSealed, isDeliveryKey } from '/shared/sealed.js';
+import { applyAction, actionPayload, quoteOf, extrasOf, reactionSummary, QUICK_REACTIONS } from '/shared/actions.js';
 
 // ---------- local vault (keys + history stay on this device, encrypted) ----------
 // ?profile=name lets several devices/accounts run side by side in one browser for testing.
@@ -218,7 +219,7 @@ async function deliver(env, { retries = 3 } = {}) {
     }
     if (e.relay && e.message !== 'rate limited') return settleCopy(env, 'failed', e.message);
     if (retries > 0) return setTimeout(() => deliver(env, { retries: retries - 1 }), 2000);
-    if (!findMessage(env.id)) wsSend({ type: 'send', envelope: env }); // a call signal can't wait
+    if (!findMessage(env.id) && !(db.actionsOut || []).some((e) => e.id === env.id)) wsSend({ type: 'send', envelope: env }); // a call signal can't wait
   }
 }
 
@@ -397,6 +398,7 @@ function findMessage(id) {
 }
 
 function settleCopy({ id, to, toDevice }, outcome, error, sealed = false) {
+  if (settleAction({ id, to, toDevice })) return;
   const found = findMessage(id);
   if (!found?.m.out) return;
   const { m } = found;
@@ -421,6 +423,7 @@ function flushOutbox() {
   for (const t of Object.values(db.threads)) {
     for (const m of t) for (const env of m.out || []) deliver(env);
   }
+  for (const env of db.actionsOut || []) deliver(env);
 }
 
 // ---------- contacts: accounts and their device lists ----------
@@ -490,8 +493,10 @@ async function addContact(raw) {
 }
 
 // ---------- messaging ----------
-async function sendText(text, tr = null) {
-  const to = active;
+async function sendText(text, tr = null, extra = null, to = active) {
+  if (extra === null && to === active && composeCtx?.mode === 'reply') { extra = { reply: composeCtx.quote }; clearComposeCtx(); }
+  extra ||= {};
+  const wire = { ...(extra.reply ? { reply: extra.reply } : {}), ...(extra.fwd ? { fwd: true } : {}) };
   try { await refreshContact(to); } catch { /* offline: use the cached device list */ }
   const c = db.contacts[to];
   if (!c?.list || c.pendingAccount) return;
@@ -501,9 +506,9 @@ async function sendText(text, tr = null) {
   const skipped = [];
   // every device of the contact, then my own other devices (so they show what I sent)
   const targets = [
-    ...c.list.payload.devices.map((d) => ({ addr: deviceAddr(to, d.id), payload: { kind: 'text', text, ...trFields(tr), dk: db.deliveryKey || undefined }, name: d.name })),
+    ...c.list.payload.devices.map((d) => ({ addr: deviceAddr(to, d.id), payload: { kind: 'text', text, ...trFields(tr), ...wire, dk: db.deliveryKey || undefined }, name: d.name })),
     ...myDevices().filter((d) => d.id !== db.deviceId)
-      .map((d) => ({ addr: deviceAddr(db.handle, d.id), payload: { kind: 'sync', peer: to, text, ...trFields(tr) }, name: d.name })),
+      .map((d) => ({ addr: deviceAddr(db.handle, d.id), payload: { kind: 'sync', peer: to, text, ...trFields(tr), ...wire }, name: d.name })),
   ];
   for (const t of targets) {
     try {
@@ -514,10 +519,11 @@ async function sendText(text, tr = null) {
       skipped.push(`${t.name}: ${err.message}`);
     }
   }
-  const msg = { id, from: db.handle, text, ts, status: registered ? 'sending' : 'offline', out, ...(tr ? { sentTr: tr } : {}) };
+  const msg = { id, from: db.handle, text, ts, status: registered ? 'sending' : 'offline', out, ...(tr ? { sentTr: tr } : {}), ...extrasOf(wire) };
   if (!out.some((e) => e.to !== db.handle)) { msg.status = 'failed: ' + (skipped[0] || 'no devices'); delete msg.out; }
-  db.threads[to].push(msg);
-  renderMessages(); renderContacts(); renderPqBadge();
+  (db.threads[to] ??= []).push(msg);
+  if (to === active) { renderMessages(); renderPqBadge(); }
+  renderContacts();
   // The ratchets have advanced: that must be on disk before any ciphertext leaves, or a crash
   // could make this device reuse a message key for a different message.
   try { await persist(); } catch {
@@ -525,6 +531,40 @@ async function sendText(text, tr = null) {
     return;
   }
   for (const env of out) deliver(env);
+}
+
+/**
+ * Edit, delete or react: applied here at once, then sent to every device of the contact and to my
+ * own other devices. Copies wait in db.actionsOut until the relay takes them, like messages do.
+ */
+async function sendAction(to, act, target, fields = {}) {
+  const c = db.contacts[to];
+  if (!c?.list || c.pendingAccount) return;
+  const payload = actionPayload(act, target, fields);
+  if (!applyAction(db.threads[to] || [], db.handle, payload)) return;
+  const id = newMessageId();
+  const ts = Date.now();
+  const targets = [
+    ...c.list.payload.devices.map((d) => ({ addr: deviceAddr(to, d.id), payload })),
+    ...myDevices().filter((d) => d.id !== db.deviceId).map((d) => ({ addr: deviceAddr(db.handle, d.id), payload: { ...payload, peer: to } })),
+  ];
+  const out = [];
+  for (const t of targets) {
+    try { out.push(await sessions.encrypt(t.addr, t.payload, { id, ts })); } catch { /* that device misses this one */ }
+  }
+  (db.actionsOut ??= []).push(...out);
+  if (to === active) renderMessages();
+  renderContacts();
+  try { await persist(); } catch { return; }
+  for (const env of out) deliver(env);
+}
+
+function settleAction({ id, to, toDevice }) {
+  const i = (db.actionsOut || []).findIndex((e) => e.id === id && e.to === to && e.toDevice === toDevice);
+  if (i < 0) return false;
+  db.actionsOut.splice(i, 1);
+  persist();
+  return true;
 }
 
 /** Sent translated: the original and both languages go along (inside the encryption, like the text). */
@@ -593,6 +633,17 @@ async function processEnvelope(env) {
     if (!fromSelf) calls?.onSignal(env, payload);
     return;
   }
+  if (payload.kind === 'action') {
+    const peer = fromSelf ? payload.peer : env.from;
+    if (!isValidHandle(peer) || !db.threads[peer]) return;
+    const m = applyAction(db.threads[peer], fromSelf ? db.handle : env.from, payload, env.ts);
+    if (!m) return;
+    persist();
+    renderContacts();
+    if (peer === active) renderMessages();
+    if (payload.act === 'edit' && !fromSelf && translating(peer)) translateEntry(peer, m);
+    return;
+  }
   let peer;
   let entry;
   if (fromSelf) {
@@ -600,13 +651,13 @@ async function processEnvelope(env) {
     if (payload.kind !== 'sync' || !isValidHandle(payload.peer)) return;
     peer = payload.peer;
     if (!db.contacts[peer]) await refreshContact(peer, { force: true }).catch(() => {});
-    entry = { id: env.id, from: db.handle, text: String(payload.text ?? ''), ts: env.ts, status: 'sent from another device' };
+    entry = { id: env.id, from: db.handle, text: String(payload.text ?? ''), ts: env.ts, status: 'sent from another device', ...extrasOf(payload) };
     const st = sentTrOf(payload);
     if (st) entry.sentTr = st;
   } else {
     if (payload.kind !== 'text') return;
     peer = env.from;
-    entry = { id: env.id, from: peer, text: String(payload.text ?? ''), ts: env.ts };
+    entry = { id: env.id, from: peer, text: String(payload.text ?? ''), ts: env.ts, ...extrasOf(payload) };
     const st = sentTrOf(payload);
     if (st) entry.sentTr = st;
   }
@@ -625,19 +676,100 @@ async function processEnvelope(env) {
 function renderContacts() {
   const ul = $('contacts');
   ul.replaceChildren();
-  const handles = Object.keys(db.contacts).sort((a, b) => lastTs(b) - lastTs(a));
+  const q = searchQuery();
+  const handles = Object.keys(db.contacts).sort((a, b) => lastTs(b) - lastTs(a))
+    .filter((h) => !q || h.toLowerCase().includes(q));
   for (const h of handles) {
     const li = el('li', h === active ? 'active' : '');
-    const left = el('div');
-    const name = el('div', '', h);
+    const left = el('div', 'contact-main');
+    const top = el('div', 'contact-top');
+    const name = el('div', 'contact-name', h);
     if (db.contacts[h].verified) name.append(' ', el('span', 'verified', '✓'));
     const last = db.threads[h]?.filter((m) => m.from !== '@system').at(-1);
-    left.append(name, el('div', 'preview', last ? last.text : 'No messages yet'));
-    li.append(left);
-    if (db.unread[h]) li.append(el('span', 'badge', String(db.unread[h])));
+    const lastAny = db.threads[h]?.at(-1);
+    top.append(name, el('span', 'contact-time', lastAny ? shortWhen(lastAny.ts) : ''));
+    const bottom = el('div', 'contact-bottom');
+    const mine = last && last.from === db.handle;
+    bottom.append(el('div', 'preview', last ? (mine ? 'You: ' : '') + last.text : 'No messages yet'));
+    if (db.unread[h]) bottom.append(el('span', 'badge', String(db.unread[h])));
+    left.append(top, bottom);
+    li.append(avatarEl(h), left);
     li.onclick = () => openThread(h);
     ul.append(li);
   }
+  if (!handles.length) {
+    const hint = q
+      ? (isValidHandle(normalizeHandle(q)) ? `No chats match. Press + to start a chat with ${normalizeHandle(q)}.` : 'No chats match.')
+      : 'No chats yet. Type an address like @alex above and press +.';
+    ul.append(el('li', 'contacts-empty', hint));
+  }
+  renderSearchHits(q);
+}
+const searchQuery = () => ($('add-handle')?.value || '').trim().toLowerCase().replace(/^@$/, '');
+
+/** Messages matching the search box, across every chat on this device. */
+function renderSearchHits(q) {
+  const box = $('search-hits');
+  box.replaceChildren();
+  const hits = [];
+  if (q.length >= 2) {
+    for (const [h, list] of Object.entries(db.threads)) {
+      for (const m of list) if (m.from !== '@system' && m.text?.toLowerCase().includes(q)) hits.push({ h, m });
+    }
+  }
+  box.classList.toggle('hidden', !hits.length);
+  if (!hits.length) return;
+  hits.sort((a, b) => b.m.ts - a.m.ts);
+  box.append(el('div', 'eyebrow', `Messages · ${hits.length}`));
+  for (const { h, m } of hits.slice(0, 40)) {
+    const b = el('button', 'hit');
+    b.type = 'button';
+    const top = el('div', 'contact-top');
+    top.append(el('span', 'contact-name', h), el('span', 'contact-time', shortWhen(m.ts)));
+    b.append(top, highlighted(m.text, q, 'preview'));
+    b.onclick = () => { openThread(h).then(() => openThreadSearch(q)); };
+    box.append(b);
+  }
+}
+
+/** Text with every match of q wrapped in <mark>, built without innerHTML. */
+function highlighted(text, q, cls) {
+  const out = el('div', cls);
+  const low = text.toLowerCase();
+  let i = 0;
+  for (let j = q ? low.indexOf(q) : -1; j >= 0; j = low.indexOf(q, i)) {
+    out.append(document.createTextNode(text.slice(i, j)), el('mark', '', text.slice(j, j + q.length)));
+    i = j + q.length;
+  }
+  out.append(document.createTextNode(text.slice(i)));
+  return out;
+}
+
+function avatarEl(h, cls = 'avatar') {
+  const a = el('div', cls, (h.replace(/^@/, '')[0] || '?').toUpperCase());
+  a.setAttribute('aria-hidden', 'true');
+  a.style.background = avatarColor(h);
+  return a;
+}
+function avatarColor(h) {
+  let x = 0;
+  for (const ch of h) x = (x * 31 + ch.charCodeAt(0)) >>> 0;
+  return `hsl(${x % 360} 22% 34%)`;
+}
+function shortWhen(ts) {
+  const d = new Date(ts), now = new Date();
+  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const y = new Date(now); y.setDate(now.getDate() - 1);
+  if (d.toDateString() === y.toDateString()) return 'Yesterday';
+  if (now - d < 6 * 864e5) return d.toLocaleDateString([], { weekday: 'short' });
+  return d.toLocaleDateString([], { day: 'numeric', month: 'short' });
+}
+function dayLabel(ts) {
+  const d = new Date(ts), now = new Date();
+  if (d.toDateString() === now.toDateString()) return 'Today';
+  const y = new Date(now); y.setDate(now.getDate() - 1);
+  if (d.toDateString() === y.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long', ...(d.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) });
 }
 const lastTs = (h) => db.threads[h]?.at(-1)?.ts || db.contacts[h]?.addedAt || 0;
 
@@ -645,15 +777,41 @@ function renderMessages() {
   if (!active) return;
   const ol = $('messages');
   ol.replaceChildren();
+  const q = threadQuery;
+  let lastDay = '', hits = 0, lastHit = null;
   for (const m of db.threads[active] || []) {
+    const day = new Date(m.ts).toDateString();
+    if (day !== lastDay) { ol.append(el('li', 'day-sep', dayLabel(m.ts))); lastDay = day; }
     if (m.from === '@system') { ol.append(el('li', 'sysline', m.text)); continue; }
     const mine = m.from === db.handle;
-    const li = el('li', 'msg' + (mine ? ' mine' : '') + (m.status?.startsWith('failed') ? ' failed' : ''));
+    const li = el('li', 'msg' + (mine ? ' mine' : '') + (m.status?.startsWith('failed') ? ' failed' : '') + (m.deleted ? ' deleted' : ''));
+    li.dataset.id = m.id;
+    li.tabIndex = 0;
+    bindMessageMenu(li, m);
+    const time0 = new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (m.deleted) {
+      li.append(el('div', 'msg-text', mine ? 'You deleted this message' : 'This message was deleted'));
+      li.append(el('div', 'meta', time0));
+      ol.append(li);
+      continue;
+    }
+    if (m.forwarded) li.append(el('div', 'fwd-label', 'Forwarded'));
+    if (m.reply) {
+      const quote = el('button', 'quote');
+      quote.type = 'button';
+      const orig = (db.threads[active] || []).find((x) => x.id === m.reply.id);
+      quote.append(el('span', 'quote-from', m.reply.from === db.handle ? 'You' : m.reply.from), el('span', 'quote-text', orig?.deleted || !m.reply.text ? 'Deleted message' : m.reply.text));
+      quote.onclick = (e) => { e.stopPropagation(); jumpTo(m.reply.id); };
+      li.append(quote);
+    }
     const translated = !mine && m.tr?.text && !showOriginal.has(m.id);
     const flipped = m.sentTr && showOriginal.has(m.id); // a message sent translated, shown as written
-    li.append(document.createTextNode(flipped ? m.sentTr.text : translated ? m.tr.text : m.text));
+    const shown = flipped ? m.sentTr.text : translated ? m.tr.text : m.text;
+    if (q && shown.toLowerCase().includes(q)) { li.append(...highlighted(shown, q, 'msg-text').childNodes); li.classList.add('hit'); hits++; lastHit = li; }
+    else li.append(document.createTextNode(shown));
     const time = new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    li.append(el('div', 'meta', mine ? `${time} · ${m.status || ''}${m.sealed ? ' · sealed' : ''}` : time));
+    const ed = m.edited ? 'edited · ' : '';
+    li.append(el('div', 'meta', mine ? `${ed}${time} · ${m.status || ''}${m.sealed ? ' · sealed' : ''}` : ed + time));
     if (m.sentTr) {
       const lang = languageName(m.sentTr.to);
       const label = mine
@@ -673,9 +831,24 @@ function renderMessages() {
       note.append(b);
       li.append(note);
     }
+    const groups = reactionSummary(m, db.handle);
+    if (groups.length) {
+      const row = el('div', 'reactions');
+      for (const g of groups) {
+        const b = el('button', 'reaction' + (g.mine ? ' mine' : ''), g.count > 1 ? `${g.emoji} ${g.count}` : g.emoji);
+        b.type = 'button';
+        b.title = g.mine ? 'Remove your reaction' : `React with ${g.emoji}`;
+        b.onclick = (e) => { e.stopPropagation(); react(m, g.mine ? '' : g.emoji); };
+        row.append(b);
+      }
+      li.append(row);
+    }
     ol.append(li);
   }
-  ol.scrollTop = ol.scrollHeight;
+  if (q) {
+    $('thread-search-count').textContent = hits ? `${hits} found` : 'None found';
+    lastHit?.scrollIntoView({ block: 'center' });
+  } else ol.scrollTop = ol.scrollHeight;
   renderTranslateToggle();
   renderTranslateOut();
   suggestReplies();
@@ -946,15 +1119,21 @@ async function openThread(h) {
   $('empty').classList.add('hidden');
   $('thread').classList.remove('hidden');
   $('peer').textContent = h;
+  $('peer-avatar').replaceWith(Object.assign(avatarEl(h), { id: 'peer-avatar' }));
   $('safety').classList.add('hidden');
   $('summary').classList.add('hidden');
+  closeThreadMenu();
+  closeThreadSearch();
+  closeMsgMenu();
+  if (composeCtx) clearComposeCtx();
   switchTab('chats');
   renderContacts(); renderMessages(); renderKeyWarning(); renderPqBadge();
   if (registered) {
     try { await refreshContact(h, { force: true }); } catch { /* offline or unknown: keep cached list */ }
     if (active === h) { renderKeyWarning(); renderMessages(); }
   }
-  $('text').focus();
+  // On touch screens focusing would pop up the keyboard over the conversation; let the user tap.
+  if (!matchMedia('(pointer: coarse)').matches) $('text').focus();
 }
 
 async function showSafety() {
@@ -1061,15 +1240,229 @@ async function demoSettle() {
 }
 
 // ---------- tabs & app shell ----------
+const VIEWS = ['chats', 'calls', 'phone', 'settings', 'earn', 'security'];
+const SUBVIEWS = { earn: 'settings', security: 'settings' }; // opened from Settings; back returns there
+let currentTab = 'chats';
 function switchTab(name) {
-  for (const b of document.querySelectorAll('.tab')) b.classList.toggle('active', b.dataset.tab === name);
-  $('view-chats').classList.toggle('hidden', name !== 'chats');
-  $('view-earn').classList.toggle('hidden', name !== 'earn');
-  $('view-phone').classList.toggle('hidden', name !== 'phone');
-  $('view-security').classList.toggle('hidden', name !== 'security');
+  currentTab = name;
+  const navTab = SUBVIEWS[name] || name;
+  for (const b of document.querySelectorAll('.tab')) b.classList.toggle('active', b.dataset.tab === navTab);
+  for (const v of VIEWS) $(`view-${v}`).classList.toggle('hidden', name !== v);
   if (name === 'earn') { wsSend({ type: 'account' }); preview(); }
   if (name === 'security') renderSecurity();
   if (name === 'phone') phone?.refresh();
+  if (name === 'calls') renderCallLog();
+  if (name === 'settings') renderSettings();
+  // phones show one screen at a time: the chat list, a top-level section, or a deep screen
+  if (name === 'chats') setScreen(active && !$('thread').classList.contains('hidden') ? 'deep' : 'list');
+  else setScreen(SUBVIEWS[name] ? 'deep' : 'main');
+}
+
+/** list: chat list + bottom bar · main: a section + bottom bar · deep: one full screen (a chat, a sub-page). */
+function setScreen(kind) {
+  const app = $('app');
+  app.classList.toggle('m-main', kind !== 'list');
+  app.classList.toggle('m-deep', kind === 'deep');
+}
+
+function closeThread() {
+  active = null;
+  closeThreadMenu();
+  closeThreadSearch();
+  closeOutPreview();
+  $('thread').classList.add('hidden');
+  $('empty').classList.remove('hidden');
+  renderContacts();
+  setScreen('list');
+}
+
+function goBack() {
+  if (SUBVIEWS[currentTab]) return switchTab(SUBVIEWS[currentTab]);
+  if (currentTab !== 'chats') return switchTab('chats');
+  closeThread();
+}
+
+// ---------- calls log ----------
+const CALL_RE = /\bcall\b/i;
+function renderCallLog() {
+  const ul = $('call-log');
+  ul.replaceChildren();
+  const rows = [];
+  for (const [h, list] of Object.entries(db.threads)) for (const m of list) if (m.from === '@system' && CALL_RE.test(m.text)) rows.push({ h, m });
+  rows.sort((a, b) => b.m.ts - a.m.ts);
+  if (!rows.length) { ul.append(el('li', 'contacts-empty', 'No calls yet.')); return; }
+  for (const { h, m } of rows.slice(0, 100)) {
+    const li = el('li', /missed|failed|no answer|declined/i.test(m.text) ? 'missed' : '');
+    const mid = el('div', 'contact-main');
+    const top = el('div', 'contact-top');
+    top.append(el('span', 'contact-name', h), el('span', 'contact-time', shortWhen(m.ts)));
+    mid.append(top, el('div', 'preview', m.text));
+    const voice = el('button', 'icon-btn');
+    voice.type = 'button'; voice.title = `Voice call ${h}`; voice.setAttribute('aria-label', voice.title);
+    voice.append(svgIcon('M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a1 1 0 01-1 1A16 16 0 014 5a1 1 0 011-1z'));
+    voice.onclick = (e) => { e.stopPropagation(); calls?.start(h, false); };
+    const video = el('button', 'icon-btn');
+    video.type = 'button'; video.title = `Video call ${h}`; video.setAttribute('aria-label', video.title);
+    video.append(svgIcon('M3 6h13v12H3zM16 10l5-3v10l-5-3'));
+    video.onclick = (e) => { e.stopPropagation(); calls?.start(h, true); };
+    li.append(avatarEl(h), mid, voice, video);
+    li.onclick = () => openThread(h);
+    ul.append(li);
+  }
+}
+function svgIcon(d) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  const p = document.createElementNS(NS, 'path');
+  p.setAttribute('d', d);
+  svg.append(p);
+  return svg;
+}
+
+function renderSettings() {
+  if (!db?.handle) return;
+  $('settings-avatar').replaceWith(Object.assign(avatarEl(db.handle, 'avatar big'), { id: 'settings-avatar' }));
+  $('settings-handle').textContent = db.handle;
+  $('settings-device').textContent = `${db.deviceName}${db.primary ? ' · primary device' : ' · linked device'}`;
+}
+
+// ---------- message actions: reply, react, copy, forward, edit, delete ----------
+let composeCtx = null; // { mode: 'reply', quote } | { mode: 'edit', id }
+let menuMsg = null;
+
+function bindMessageMenu(li, m) {
+  li.addEventListener('contextmenu', (e) => { e.preventDefault(); openMsgMenu(m, li); });
+  let timer = 0, sx = 0, sy = 0;
+  li.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse') return;
+    sx = e.clientX; sy = e.clientY;
+    timer = setTimeout(() => { timer = 0; navigator.vibrate?.(15); openMsgMenu(m, li); }, 450);
+  });
+  const cancel = () => { clearTimeout(timer); timer = 0; };
+  li.addEventListener('pointerup', cancel);
+  li.addEventListener('pointercancel', cancel);
+  li.addEventListener('pointermove', (e) => { if (timer && Math.hypot(e.clientX - sx, e.clientY - sy) > 10) cancel(); });
+  li.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === 'ContextMenu') { e.preventDefault(); openMsgMenu(m, li); } });
+  const more = el('button', 'msg-more', '⌄');
+  more.type = 'button';
+  more.title = 'Message actions';
+  more.setAttribute('aria-label', 'Message actions');
+  more.onclick = (e) => { e.stopPropagation(); openMsgMenu(m, li); };
+  li.append(more);
+}
+
+function openMsgMenu(m, li) {
+  menuMsg = m;
+  const mine = m.from === db.handle;
+  const menu = $('msg-menu');
+  const react = $('msg-react');
+  react.replaceChildren();
+  for (const e of QUICK_REACTIONS) {
+    const b = el('button', 'react-pick' + (m.reactions?.[db.handle] === e ? ' mine' : ''), e);
+    b.type = 'button';
+    b.setAttribute('aria-label', `React with ${e}`);
+    b.onclick = () => { closeMsgMenu(); window.react(m, m.reactions?.[db.handle] === e ? '' : e); };
+    react.append(b);
+  }
+  react.classList.toggle('hidden', Boolean(m.deleted));
+  const show = { reply: !m.deleted, copy: !m.deleted, forward: !m.deleted, edit: mine && !m.deleted, 'delete-all': mine && !m.deleted, 'delete-me': true };
+  for (const [k, on] of Object.entries(show)) $(`msg-${k}`).classList.toggle('hidden', !on);
+  menu.classList.remove('hidden');
+  // next to the message, kept on screen
+  const r = li.getBoundingClientRect();
+  const w = menu.offsetWidth, h = menu.offsetHeight;
+  let top = r.bottom + 4;
+  if (top + h > innerHeight - 8) top = Math.max(8, r.top - h - 4);
+  const left = Math.min(Math.max(8, mine ? r.right - w : r.left), innerWidth - w - 8);
+  menu.style.top = `${top}px`;
+  menu.style.left = `${left}px`;
+  menu.querySelector('button:not(.hidden)')?.focus();
+}
+function closeMsgMenu() { $('msg-menu').classList.add('hidden'); }
+
+window.react = (m, emoji) => { if (active) sendAction(active, 'react', m.id, { emoji }); };
+const react = window.react;
+
+function setComposeCtx(ctx) {
+  composeCtx = ctx;
+  const bar = $('compose-ctx');
+  bar.classList.toggle('hidden', !ctx);
+  if (!ctx) return;
+  $('compose-ctx-label').textContent = ctx.mode === 'edit' ? 'Editing message' : `Replying to ${ctx.quote.from === db.handle ? 'yourself' : ctx.quote.from}`;
+  $('compose-ctx-text').textContent = ctx.mode === 'edit' ? ctx.original : ctx.quote.text;
+  $('text').focus();
+}
+function clearComposeCtx() {
+  if (composeCtx?.mode === 'edit') $('text').value = '';
+  setComposeCtx(null);
+  growText();
+}
+
+function jumpTo(id) {
+  const li = $('messages').querySelector(`[data-id="${CSS.escape(id)}"]`);
+  if (!li) return;
+  li.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  li.classList.add('flash');
+  setTimeout(() => li.classList.remove('flash'), 1200);
+}
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); toast('Copied'); }
+  catch {
+    const t = el('textarea'); t.value = text; document.body.append(t); t.select();
+    try { document.execCommand('copy'); toast('Copied'); } catch { toast('Could not copy'); }
+    t.remove();
+  }
+}
+function toast(text) {
+  const t = $('toast');
+  t.textContent = text;
+  t.classList.remove('hidden');
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => t.classList.add('hidden'), 1600);
+}
+
+function openForward(m) {
+  const list = $('fwd-list');
+  list.replaceChildren();
+  const handles = Object.keys(db.contacts).filter((h) => db.contacts[h].list && !db.contacts[h].pendingAccount).sort((a, b) => lastTs(b) - lastTs(a));
+  if (!handles.length) list.append(el('li', 'contacts-empty', 'No contacts yet.'));
+  for (const h of handles) {
+    const b = el('button', 'fwd-to');
+    b.type = 'button';
+    b.append(avatarEl(h), el('span', 'contact-name', h));
+    b.onclick = async () => {
+      $('fwd-dialog').close();
+      await sendText(m.text, null, { fwd: true }, h);
+      toast(`Forwarded to ${h}`);
+    };
+    const item = el('li');
+    item.append(b);
+    list.append(item);
+  }
+  $('fwd-dialog').showModal();
+}
+
+// ---------- thread menu and in-chat search ----------
+let threadQuery = '';
+function closeThreadMenu() {
+  $('thread-menu').classList.add('hidden');
+  $('thread-menu-btn').setAttribute('aria-expanded', 'false');
+}
+function openThreadSearch(q = '') {
+  closeThreadMenu();
+  $('thread-search').classList.remove('hidden');
+  $('thread-search-q').value = q;
+  threadQuery = q.trim().toLowerCase();
+  renderMessages();
+  $('thread-search-q').focus();
+}
+function closeThreadSearch() {
+  $('thread-search').classList.add('hidden');
+  $('thread-search-count').textContent = '';
+  if (threadQuery) { threadQuery = ''; if (active) renderMessages(); }
 }
 
 function showApp() {
@@ -1079,6 +1472,7 @@ function showApp() {
   $('me-device').textContent = `${db.deviceName}${db.primary ? ' · primary' : ' · linked'}`;
   document.title = `FabriC++ · ${db.handle}`;
   renderContacts();
+  setScreen('list');
 }
 
 function requestPersistentStorage() {
@@ -1886,6 +2280,12 @@ $('composer').onsubmit = (e) => {
   e.preventDefault();
   const t = $('text').value.trim();
   if (!t || !active) return;
+  if (composeCtx?.mode === 'edit') {
+    const id = composeCtx.id;
+    clearComposeCtx();
+    if (t !== findMessage(id)?.m.text) sendAction(active, 'edit', id, { text: t });
+    return;
+  }
   const to = aiPrefs().out[active];
   if (to) return previewOut(active, t, to);
   $('text').value = '';
@@ -1905,6 +2305,75 @@ $('call-video').onclick = () => active && calls?.start(active, true);
 $('summarize').onclick = showSummary;
 $('preview-form').onsubmit = (e) => { e.preventDefault(); preview(); };
 $('settle').onclick = demoSettle;
-for (const b of document.querySelectorAll('.tab')) b.onclick = () => switchTab(b.dataset.tab);
+for (const b of document.querySelectorAll('[data-tab]')) b.onclick = () => switchTab(b.dataset.tab);
+for (const b of document.querySelectorAll('[data-back]')) b.onclick = goBack;
+$('back').onclick = closeThread;
+for (const b of document.querySelectorAll('[data-go]')) b.onclick = () => {
+  switchTab(b.dataset.go);
+  if (b.dataset.focus) $(b.dataset.focus)?.scrollIntoView({ block: 'start' });
+};
+$('add-handle').oninput = () => { $('add-error').textContent = ''; renderContacts(); };
+$('new-chat').onclick = () => {
+  if (active) closeThread(); else switchTab('chats');
+  const i = $('add-handle');
+  if (!i.value.startsWith('@')) i.value = '@';
+  i.focus();
+};
+$('thread-menu-btn').onclick = (e) => {
+  e.stopPropagation();
+  const open = $('thread-menu').classList.toggle('hidden') === false;
+  $('thread-menu-btn').setAttribute('aria-expanded', String(open));
+};
+$('thread-menu').addEventListener('click', () => closeThreadMenu());
+document.addEventListener('click', (e) => { if (!e.target.closest('.menu-wrap')) closeThreadMenu(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!$('msg-menu').classList.contains('hidden')) closeMsgMenu();
+  else if (composeCtx) clearComposeCtx();
+  else if (!$('thread-menu').classList.contains('hidden')) closeThreadMenu();
+  else if (!$('thread-search').classList.contains('hidden')) closeThreadSearch();
+});
+$('thread-search-btn').onclick = () => openThreadSearch();
+$('msg-reply').onclick = () => { const m = menuMsg; closeMsgMenu(); if (m) setComposeCtx({ mode: 'reply', quote: quoteOf(m) }); };
+$('msg-copy').onclick = () => { const m = menuMsg; closeMsgMenu(); if (m) copyText(m.text); };
+$('msg-forward').onclick = () => { const m = menuMsg; closeMsgMenu(); if (m) openForward(m); };
+$('msg-edit').onclick = () => {
+  const m = menuMsg; closeMsgMenu();
+  if (!m) return;
+  setComposeCtx({ mode: 'edit', id: m.id, original: m.text });
+  $('text').value = m.text; growText();
+};
+$('msg-delete-all').onclick = () => {
+  const m = menuMsg; closeMsgMenu();
+  if (m && active && confirm('Delete this message for everyone in the chat?')) sendAction(active, 'delete', m.id);
+};
+$('msg-delete-me').onclick = () => {
+  const m = menuMsg; closeMsgMenu();
+  if (!m || !active || !confirm('Delete this message from this device? Others keep their copy.')) return;
+  db.threads[active] = db.threads[active].filter((x) => x !== m);
+  persist(); renderMessages(); renderContacts();
+};
+$('compose-ctx-close').onclick = clearComposeCtx;
+$('fwd-cancel').onclick = () => $('fwd-dialog').close();
+document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#msg-menu')) closeMsgMenu(); }, true);
+$('messages').addEventListener('scroll', closeMsgMenu, { passive: true });
+$('thread-search-close').onclick = closeThreadSearch;
+$('thread-search').onsubmit = (e) => e.preventDefault();
+$('thread-search-q').oninput = (e) => { threadQuery = e.target.value.trim().toLowerCase(); renderMessages(); };
+$('clear-chat').onclick = () => {
+  if (!active || !confirm(`Delete every message with ${active} from this device? They keep their copy.`)) return;
+  db.threads[active] = [];
+  persist(); renderMessages(); renderContacts();
+};
+// Enter sends on a keyboard (Shift+Enter adds a line); on phones Enter is a new line and the button sends
+$('text').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !matchMedia('(pointer: coarse)').matches) {
+    e.preventDefault();
+    $('composer').requestSubmit();
+  }
+});
+const growText = () => { const t = $('text'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 140) + 'px'; };
+$('text').addEventListener('input', growText);
+$('composer').addEventListener('submit', () => setTimeout(growText));
 
 boot();

@@ -9,7 +9,7 @@ Product spec: https://infinitum-corporation.vercel.app/products/fabric
 ```bash
 npm install
 npm start          # http://localhost:8787
-npm test           # 130 tests: post-quantum session setup, Supabase snapshots, burner numbers, open on-device models and outgoing translation, calls at scale (TURN, simulcast, SFU nodes), Cumulus://ID sign-in, on-device AI, QR linking, sealed sender, large calls (SFU), phone, group calls, relay hardening, frame crypto, devices, backups, vault, ratchet, sessions, economy
+npm test           # 136 tests: message actions (reply, edit, delete, reactions, forward), post-quantum session setup, Supabase snapshots, burner numbers, open on-device models and outgoing translation, calls at scale (TURN, simulcast, SFU nodes), Cumulus://ID sign-in, on-device AI, QR linking, sealed sender, large calls (SFU), phone, group calls, relay hardening, frame crypto, devices, backups, vault, ratchet, sessions, economy
 ```
 
 To try two users in one browser, open `http://localhost:8787/?profile=alex` and

@@ -2039,7 +2039,10 @@ function startNew(kind) {
   if (kind === 'voice') return openPicker('Voice call', (h) => calls?.start(h, false));
   if (kind === 'video') return openPicker('Video call', (h) => calls?.start(h, true));
   if (kind === 'group') return openNewGroup();
-  if (kind === 'phone') return switchTab('phone');
+  if (kind === 'phone' || kind === 'calls' || kind === 'settings') {
+    if (active) closeThread();
+    return switchTab(kind);
+  }
 }
 
 // ---------- thread menu and in-chat search ----------

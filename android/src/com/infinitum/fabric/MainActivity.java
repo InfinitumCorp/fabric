@@ -15,7 +15,9 @@ import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.widget.FrameLayout;
+import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -37,10 +39,13 @@ import java.util.List;
 public class MainActivity extends Activity {
     private static final String DEFAULT_RELAY = "http://localhost:8788/";
     private static final int PERMS = 1;
+    private static final int PICK_FILE = 2;
 
     private WebView web;
     private Uri relay;
     private PermissionRequest pending;
+    private ValueCallback<Uri[]> filePicked;
+    private FrameLayout root;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -55,11 +60,13 @@ public class MainActivity extends Activity {
         if ((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) WebView.setWebContentsDebuggingEnabled(true);
         web = new WebView(this);
         web.setBackgroundColor(Color.WHITE);
-        FrameLayout root = new FrameLayout(this);
+        root = new FrameLayout(this);
         root.setBackgroundColor(Color.WHITE);
         root.addView(web, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         setContentView(root);
         fitSystemBars(root);
+        // the page tells the shell when it switches to dark, so the status and navigation bars match
+        web.addJavascriptInterface(new Shell(), "FabricShell");
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
@@ -68,7 +75,7 @@ public class MainActivity extends Activity {
         s.setAllowFileAccess(false);
         s.setAllowContentAccess(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        s.setUserAgentString(s.getUserAgentString() + " FabricAndroid/0.15.1");
+        s.setUserAgentString(s.getUserAgentString() + " FabricAndroid/0.17.0");
 
         web.setWebViewClient(new WebViewClient() {
             @Override
@@ -85,6 +92,21 @@ public class MainActivity extends Activity {
             public void onPermissionRequest(PermissionRequest request) {
                 runOnUiThread(() -> askFor(request));
             }
+
+            /** Photos and files to send: Android's own picker, nothing read without the user choosing. */
+            @Override
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
+                if (filePicked != null) filePicked.onReceiveValue(null);
+                filePicked = callback;
+                try {
+                    startActivityForResult(params.createIntent(), PICK_FILE);
+                } catch (Exception e) {
+                    filePicked = null;
+                    callback.onReceiveValue(null);
+                    return false;
+                }
+                return true;
+            }
         });
 
         if (state != null) web.restoreState(state);
@@ -96,23 +118,51 @@ public class MainActivity extends Activity {
      * ignores adjustResize, so pad the page by those insets ourselves, and use dark system icons
      * on the white background so the clock and battery stay readable instead of covering the page.
      */
-    @SuppressWarnings("deprecation")
     private void fitSystemBars(FrameLayout root) {
-        Window w = getWindow();
-        w.setStatusBarColor(Color.WHITE);
-        w.setNavigationBarColor(Color.WHITE);
+        applyBars(false);
         if (Build.VERSION.SDK_INT >= 30) {
-            int light = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
-            WindowInsetsController c = w.getInsetsController();
-            if (c != null) c.setSystemBarsAppearance(light, light);
             root.setOnApplyWindowInsetsListener((v, insets) -> {
                 Insets i = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
                 v.setPadding(i.left, i.top, i.right, i.bottom);
                 return WindowInsets.CONSUMED;
             });
-        } else {
-            w.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         }
+    }
+
+    /** Light bars with dark icons, or dark bars with light icons, to match the page's theme. */
+    @SuppressWarnings("deprecation")
+    private void applyBars(boolean dark) {
+        Window w = getWindow();
+        int bg = dark ? Color.rgb(0x15, 0x18, 0x1b) : Color.WHITE;
+        w.setStatusBarColor(bg);
+        w.setNavigationBarColor(bg);
+        if (root != null) root.setBackgroundColor(bg);
+        if (web != null) web.setBackgroundColor(bg);
+        if (Build.VERSION.SDK_INT >= 30) {
+            int light = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+            WindowInsetsController c = w.getInsetsController();
+            if (c != null) c.setSystemBarsAppearance(dark ? 0 : light, light);
+        } else {
+            w.getDecorView().setSystemUiVisibility(dark ? 0 : View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        }
+    }
+
+    /** What the page may ask of the shell. Only the relay's own pages ever load in this WebView. */
+    private class Shell {
+        @JavascriptInterface
+        public void setDarkBars(boolean dark) {
+            runOnUiThread(() -> applyBars(dark));
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int code, int result, Intent data) {
+        if (code == PICK_FILE) {
+            if (filePicked != null) filePicked.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result, data));
+            filePicked = null;
+            return;
+        }
+        super.onActivityResult(code, result, data);
     }
 
     private static boolean allowedRelay(Uri u) {

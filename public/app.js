@@ -20,12 +20,27 @@ import { createCalls } from '/calls.js';
 import { createPhone } from '/phone.js';
 import { seal, peekSealed, openSealed, isDeliveryKey } from '/shared/sealed.js';
 import { applyAction, actionPayload, quoteOf, extrasOf, reactionSummary, QUICK_REACTIONS } from '/shared/actions.js';
+import {
+  mediaOf, mediaLabel, fmtBytes, fmtDuration, MAX_MEDIA_BYTES, receiptPayload, applyReceipt, unreadFrom,
+  freshTyping, TYPING_SEND_EVERY, TYPING_SHOW_FOR, groupOf, newGroup, mergeGroup, groupKey, isGroupKey, groupIdOf,
+  orderChats, MAX_PINNED,
+} from '/shared/chat.js';
 
 // ---------- local vault (keys + history stay on this device, encrypted) ----------
 // ?profile=name lets several devices/accounts run side by side in one browser for testing.
 const PROFILE = new URLSearchParams(location.search).get('profile') || 'default';
 const LEGACY_KEY = `fabric:v2:${PROFILE}`; // v0.2 kept everything in plain localStorage; migrated once
 const vault = new Vault(idbBackend(`fabric-${PROFILE}`));
+const THEME_KEY = 'fabric-theme';
+function applyTheme(t) {
+  const theme = ['light', 'dark'].includes(t) ? t : 'system';
+  if (theme === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem(THEME_KEY, theme); } catch { /* storage off: still applied for now */ }
+  const dark = theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+  try { window.FabricShell?.setDarkBars?.(dark); } catch { /* not in the Android app */ }
+}
+try { applyTheme(localStorage.getItem(THEME_KEY)); } catch { applyTheme('system'); }
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { try { applyTheme(localStorage.getItem(THEME_KEY)); } catch { /* */ } });
 
 const LINK_DEVICE = 'FABRIC/v3/link/device';
 const LINK_DONE = 'FABRIC/v3/link/done';
@@ -35,6 +50,7 @@ const REFRESH_MS = 15_000;
 const fresh = () => ({
   handle: null, deviceId: null, deviceName: null, primary: false, self: null,
   contacts: {}, threads: {}, unread: {}, held: {}, crypto: emptyStore(), seen: [],
+  groups: {}, chatPrefs: {}, prefs: { receipts: true, typing: true, notify: false },
 });
 // on-device AI (public/ai.js): ?media=test&ai=fake swaps in a stand-in model for testing, and
 // ?media=test&ai=open hides the browser's built-in model so the open models run instead
@@ -492,24 +508,92 @@ async function addContact(raw) {
   openThread(h);
 }
 
+// ---------- chats: one-to-one and groups ----------
+const groupsOf = () => (db.groups ??= {});
+const prefsOf = () => (db.chatPrefs ??= {});
+const userPrefs = () => (db.prefs ??= { receipts: true, typing: true, notify: false });
+const groupFor = (key) => (isGroupKey(key) ? groupsOf()[groupIdOf(key)] || null : null);
+const chatName = (key) => groupFor(key)?.name || key;
+const inGroup = (g) => Boolean(g && !g.left && g.members.includes(db.handle));
+/** Handles a message in this chat goes to (never me). */
+function recipientsOf(key) {
+  const g = groupFor(key);
+  if (g) return inGroup(g) ? g.members.filter((h) => h !== db.handle) : [];
+  return isGroupKey(key) ? [] : [key];
+}
+/** Fetch device lists for people I only know from a group; they stay out of the chat list. */
+async function ensureContacts(handles) {
+  for (const h of handles) {
+    if (h === db.handle || db.contacts[h]?.list) continue;
+    const known = Boolean(db.contacts[h]);
+    try {
+      await refreshContact(h, { force: true });
+      if (!known && db.contacts[h]) db.contacts[h].viaGroup = true;
+    } catch { /* not reachable now; a later message retries */ }
+  }
+}
+/** Every device a payload for this chat goes to, plus my own other devices (with selfPayload). */
+function deviceTargets(key, payload, selfPayload, only = null) {
+  const targets = [];
+  for (const h of recipientsOf(key)) {
+    if (only && h !== only) continue;
+    const c = db.contacts[h];
+    if (!c?.list || c.pendingAccount) continue;
+    for (const d of c.list.payload.devices) targets.push({ addr: deviceAddr(h, d.id), payload, name: `${h} · ${d.name}` });
+  }
+  if (selfPayload) {
+    for (const d of myDevices()) if (d.id !== db.deviceId) targets.push({ addr: deviceAddr(db.handle, d.id), payload: selfPayload, name: d.name });
+  }
+  return targets;
+}
+
+/**
+ * Anything that isn't a message — edits, reactions, receipts, typing, group changes — encrypted to
+ * the chat's devices (and my other devices with `self`). With `outbox`, copies wait in
+ * db.actionsOut until the relay takes them; typing signals don't wait.
+ */
+async function sendControl(key, payload, { outbox = true, self = true, only = null } = {}) {
+  const gid = groupIdOf(key);
+  const p = gid ? { ...payload, gid } : payload;
+  const targets = deviceTargets(key, p, self ? { ...p, peer: key } : null, only);
+  if (!targets.length) return;
+  const id = newMessageId();
+  const ts = Date.now();
+  const out = [];
+  for (const t of targets) {
+    try { out.push(await sessions.encrypt(t.addr, t.payload, { id, ts })); } catch { /* that device misses this one */ }
+  }
+  if (outbox) (db.actionsOut ??= []).push(...out);
+  try { await persist(); } catch { return; }
+  for (const env of out) deliver(env);
+}
+
 // ---------- messaging ----------
 async function sendText(text, tr = null, extra = null, to = active) {
   if (extra === null && to === active && composeCtx?.mode === 'reply') { extra = { reply: composeCtx.quote }; clearComposeCtx(); }
   extra ||= {};
-  const wire = { ...(extra.reply ? { reply: extra.reply } : {}), ...(extra.fwd ? { fwd: true } : {}) };
-  try { await refreshContact(to); } catch { /* offline: use the cached device list */ }
-  const c = db.contacts[to];
-  if (!c?.list || c.pendingAccount) return;
+  const g = groupFor(to);
+  if (isGroupKey(to) && !inGroup(g)) return;
+  const media = extra.media ? mediaOf({ media: extra.media }) : null;
+  const wire = {
+    ...(extra.reply ? { reply: extra.reply } : {}), ...(extra.fwd ? { fwd: true } : {}),
+    ...(media ? { media: { type: media.type, mime: media.mime, name: media.name, data: media.data, ...(media.w ? { w: media.w, h: media.h } : {}), ...(media.dur ? { dur: media.dur } : {}) } } : {}),
+    ...(g ? { group: { id: g.id, name: g.name, members: g.members } } : {}),
+  };
+  if (g) await ensureContacts(g.members);
+  else {
+    try { await refreshContact(to); } catch { /* offline: use the cached device list */ }
+    const c = db.contacts[to];
+    if (!c?.list || c.pendingAccount) return;
+  }
   const id = newMessageId();
   const ts = Date.now();
   const out = [];
   const skipped = [];
   // every device of the contact, then my own other devices (so they show what I sent)
-  const targets = [
-    ...c.list.payload.devices.map((d) => ({ addr: deviceAddr(to, d.id), payload: { kind: 'text', text, ...trFields(tr), ...wire, dk: db.deliveryKey || undefined }, name: d.name })),
-    ...myDevices().filter((d) => d.id !== db.deviceId)
-      .map((d) => ({ addr: deviceAddr(db.handle, d.id), payload: { kind: 'sync', peer: to, text, ...trFields(tr), ...wire }, name: d.name })),
-  ];
+  const targets = deviceTargets(to,
+    { kind: 'text', text, ...trFields(tr), ...wire, dk: db.deliveryKey || undefined },
+    { kind: 'sync', peer: to, text, ...trFields(tr), ...wire });
   for (const t of targets) {
     try {
       const env = await sessions.encrypt(t.addr, t.payload, { id, ts });
@@ -519,9 +603,10 @@ async function sendText(text, tr = null, extra = null, to = active) {
       skipped.push(`${t.name}: ${err.message}`);
     }
   }
-  const msg = { id, from: db.handle, text, ts, status: registered ? 'sending' : 'offline', out, ...(tr ? { sentTr: tr } : {}), ...extrasOf(wire) };
+  const msg = { id, from: db.handle, text, ts, status: registered ? 'sending' : 'offline', out, ...(tr ? { sentTr: tr } : {}), ...extrasOf(wire), ...(media ? { media } : {}) };
   if (!out.some((e) => e.to !== db.handle)) { msg.status = 'failed: ' + (skipped[0] || 'no devices'); delete msg.out; }
   (db.threads[to] ??= []).push(msg);
+  if (prefsOf()[to]?.archived && !prefsOf()[to]?.muted) delete prefsOf()[to].archived; // sending brings a chat back
   if (to === active) { renderMessages(); renderPqBadge(); }
   renderContacts();
   // The ratchets have advanced: that must be on disk before any ciphertext leaves, or a crash
@@ -538,25 +623,50 @@ async function sendText(text, tr = null, extra = null, to = active) {
  * own other devices. Copies wait in db.actionsOut until the relay takes them, like messages do.
  */
 async function sendAction(to, act, target, fields = {}) {
-  const c = db.contacts[to];
-  if (!c?.list || c.pendingAccount) return;
   const payload = actionPayload(act, target, fields);
   if (!applyAction(db.threads[to] || [], db.handle, payload)) return;
-  const id = newMessageId();
-  const ts = Date.now();
-  const targets = [
-    ...c.list.payload.devices.map((d) => ({ addr: deviceAddr(to, d.id), payload })),
-    ...myDevices().filter((d) => d.id !== db.deviceId).map((d) => ({ addr: deviceAddr(db.handle, d.id), payload: { ...payload, peer: to } })),
-  ];
-  const out = [];
-  for (const t of targets) {
-    try { out.push(await sessions.encrypt(t.addr, t.payload, { id, ts })); } catch { /* that device misses this one */ }
-  }
-  (db.actionsOut ??= []).push(...out);
   if (to === active) renderMessages();
   renderContacts();
-  try { await persist(); } catch { return; }
-  for (const env of out) deliver(env);
+  await sendControl(to, payload);
+}
+
+/** Tell senders I've read their messages in this chat (and my other devices, so they clear too). */
+async function sendReceipts(key) {
+  const t = db.threads[key];
+  if (!t || document.hidden) return;
+  const pending = unreadFrom(t, db.handle);
+  if (!pending.length) return;
+  const recent = Date.now() - 7 * 864e5;
+  for (const m of pending) m.receiptSent = true;
+  persist();
+  if (userPrefs().receipts === false) return;
+  const bySender = {};
+  for (const m of pending) if (m.ts > recent && isValidHandle(m.from)) (bySender[m.from] ??= []).push(m.id);
+  for (const [h, ids] of Object.entries(bySender)) {
+    await sendControl(key, receiptPayload(ids), { only: h }).catch(() => {});
+  }
+}
+
+// typing: sent at most every few seconds while composing, shown for a few seconds
+const typingNow = {};
+let lastTypingSent = 0;
+function renderTyping() {
+  const t = active && typingNow[active];
+  const on = Boolean(t && t.until > Date.now());
+  const box = $('typing');
+  if (!box) return;
+  box.textContent = on ? (isGroupKey(active) ? `${t.who} is typing…` : 'typing…') : '';
+  box.classList.toggle('hidden', !on);
+  $('peer-status')?.classList.toggle('hidden', on);
+}
+function noteTyping() {
+  if (!active || composeCtx?.mode === 'edit' || userPrefs().typing === false || !$('text').value.trim()) return;
+  // only once we've heard from them, so a typing signal never sets up a new session by itself
+  if (!(db.threads[active] || []).some((m) => m.from !== db.handle && m.from !== '@system')) return;
+  const now = Date.now();
+  if (now - lastTypingSent < TYPING_SEND_EVERY) return;
+  lastTypingSent = now;
+  sendControl(active, { kind: 'typing' }, { outbox: false, self: false }).catch(() => {});
 }
 
 function settleAction({ id, to, toDevice }) {
@@ -605,8 +715,10 @@ async function processEnvelope(env) {
     return;
   }
   const fromSelf = env.from === db.handle;
-  if (!fromSelf && !db.contacts[env.from]) {
+  const newSender = !fromSelf && !db.contacts[env.from];
+  if (newSender) {
     try { await refreshContact(env.from, { force: true }); } catch { return; } // someone new
+    db.contacts[env.from].viaGroup = true; // out of the chat list until they write to me directly
   }
   const c = fromSelf ? null : db.contacts[env.from];
   if (c?.pendingAccount) {
@@ -633,9 +745,70 @@ async function processEnvelope(env) {
     if (!fromSelf) calls?.onSignal(env, payload);
     return;
   }
+  // which chat a control payload belongs to: a group I'm in (by gid), else the contact
+  const keyOf = () => {
+    if (payload.gid !== undefined) {
+      const k = groupKey(String(payload.gid));
+      const g = groupFor(k);
+      return g && (fromSelf || g.members.includes(env.from)) ? k : null;
+    }
+    const k = fromSelf ? payload.peer : env.from;
+    if (isGroupKey(k)) return fromSelf && groupFor(k) ? k : null;
+    return isValidHandle(k) ? k : null;
+  };
+  if (payload.kind === 'typing') {
+    if (fromSelf || !freshTyping(env.ts)) return;
+    const k = keyOf();
+    if (!k) return;
+    typingNow[k] = { who: env.from, until: Date.now() + TYPING_SHOW_FOR };
+    renderTyping();
+    setTimeout(renderTyping, TYPING_SHOW_FOR + 50);
+    return;
+  }
+  if (payload.kind === 'receipt') {
+    const k = keyOf();
+    const t = k && db.threads[k];
+    if (!t || !Array.isArray(payload.ids)) return;
+    const ids = new Set(payload.ids);
+    if (fromSelf) { // read on another of my devices
+      for (const m of t) if (ids.has(m.id)) m.receiptSent = true;
+      if (!unreadFrom(t, db.handle).length) delete db.unread[k];
+    } else if (groupFor(k)) {
+      const g = groupFor(k);
+      for (const m of t) {
+        if (m.from !== db.handle || !ids.has(m.id)) continue;
+        (m.readBy ??= {})[env.from] = env.ts;
+        if (!m.read && Object.keys(m.readBy).length >= g.members.length - 1) m.read = env.ts;
+      }
+    } else applyReceipt(t, db.handle, payload, env.ts);
+    persist(); renderContacts();
+    if (k === active) renderMessages();
+    return;
+  }
+  if (payload.kind === 'group') {
+    const inc = groupOf(payload);
+    const op = ['create', 'rename', 'add', 'leave'].includes(payload.op) ? payload.op : null;
+    if (!inc || !op) return;
+    const mine = groupsOf()[inc.id];
+    const next = mergeGroup(mine, inc, env.from, db.handle, op === 'create' ? 'msg' : op);
+    if (!next) return;
+    const k = groupKey(inc.id);
+    groupsOf()[inc.id] = { ...next, created: mine?.created || env.ts, ...(fromSelf && op === 'leave' ? { left: true } : {}) };
+    db.threads[k] ??= [];
+    const who = fromSelf ? 'You' : env.from;
+    const line = op === 'create' ? (mine ? null : fromSelf ? `You created “${next.name}”` : `${who} added you to “${next.name}”`)
+      : op === 'rename' ? `${who} renamed the group to “${next.name}”`
+        : op === 'add' ? `${who} added ${next.members.filter((h) => !mine?.members.includes(h) && h !== db.handle).join(', ') || 'you'}`
+          : `${who} left`;
+    if (line) systemLine(k, line);
+    persist(); renderContacts();
+    if (k === active) { renderMessages(); renderThreadHead(); }
+    ensureContacts(next.members).then(() => persist());
+    return;
+  }
   if (payload.kind === 'action') {
-    const peer = fromSelf ? payload.peer : env.from;
-    if (!isValidHandle(peer) || !db.threads[peer]) return;
+    const peer = keyOf();
+    if (!peer || !db.threads[peer]) return;
     const m = applyAction(db.threads[peer], fromSelf ? db.handle : env.from, payload, env.ts);
     if (!m) return;
     persist();
@@ -648,56 +821,112 @@ async function processEnvelope(env) {
   let entry;
   if (fromSelf) {
     // a message I sent from another of my devices
-    if (payload.kind !== 'sync' || !isValidHandle(payload.peer)) return;
-    peer = payload.peer;
-    if (!db.contacts[peer]) await refreshContact(peer, { force: true }).catch(() => {});
+    if (payload.kind !== 'sync') return;
+    const g = groupOf(payload);
+    if (g) {
+      if (!groupsOf()[g.id]) groupsOf()[g.id] = { ...g, created: env.ts };
+      peer = groupKey(g.id);
+    } else {
+      if (!isValidHandle(payload.peer)) return;
+      peer = payload.peer;
+      if (!db.contacts[peer]) await refreshContact(peer, { force: true }).catch(() => {});
+    }
     entry = { id: env.id, from: db.handle, text: String(payload.text ?? ''), ts: env.ts, status: 'sent from another device', ...extrasOf(payload) };
     const st = sentTrOf(payload);
     if (st) entry.sentTr = st;
   } else {
     if (payload.kind !== 'text') return;
-    peer = env.from;
-    entry = { id: env.id, from: peer, text: String(payload.text ?? ''), ts: env.ts, ...extrasOf(payload) };
+    const g = groupOf(payload);
+    if (g) {
+      const mine = groupsOf()[g.id];
+      if (mine && !inGroup(mine)) return; // I left
+      const next = mergeGroup(mine, g, env.from, db.handle, 'msg');
+      if (!next) return;
+      if (!mine) {
+        groupsOf()[g.id] = { ...next, created: env.ts };
+        db.threads[groupKey(g.id)] ??= [];
+        systemLine(groupKey(g.id), `${env.from} added you to “${next.name}”`);
+        ensureContacts(next.members).then(() => persist());
+      }
+      peer = groupKey(g.id);
+    } else peer = env.from;
+    entry = { id: env.id, from: env.from, text: String(payload.text ?? ''), ts: env.ts, ...extrasOf(payload) };
     const st = sentTrOf(payload);
     if (st) entry.sentTr = st;
   }
+  const media = mediaOf(payload);
+  if (media) entry.media = media;
+  if (!entry.text && !entry.media) return;
   const thread = (db.threads[peer] ??= []);
   if (thread.some((m) => m.id === env.id)) return;
   thread.push(entry);
   thread.sort((a, b) => a.ts - b.ts);
-  if (!fromSelf && (peer !== active || document.hidden)) db.unread[peer] = (db.unread[peer] || 0) + 1;
+  if (typingNow[peer]?.who === env.from) { delete typingNow[peer]; renderTyping(); }
+  if (!fromSelf && db.contacts[env.from]?.viaGroup && peer === env.from) delete db.contacts[env.from].viaGroup;
+  if (!fromSelf && (peer !== active || document.hidden)) {
+    db.unread[peer] = (db.unread[peer] || 0) + 1;
+    notifyIncoming(peer, entry);
+  }
   persist();
   renderContacts();
-  if (peer === active) renderMessages();
+  if (peer === active) { renderMessages(); if (!fromSelf) sendReceipts(peer); }
   if (!fromSelf && translating(peer)) translateEntry(peer, entry);
 }
 
 // ---------- rendering ----------
+let showArchived = false;
+/** Every chat: contacts I talk to (not people I only know from a group) and groups. */
+function chatKeys() {
+  const keys = Object.keys(db.contacts).filter((h) => !db.contacts[h].viaGroup || db.threads[h]?.some((m) => m.from !== '@system'));
+  for (const id of Object.keys(groupsOf())) keys.push(groupKey(id));
+  return keys;
+}
+const shortName = (h) => h.replace(/^@/, '').replace(/\.veil$/, '');
+function previewOf(key, last) {
+  if (!last) return isGroupKey(key) ? (db.threads[key]?.at(-1)?.text || 'No messages yet') : 'No messages yet';
+  const who = last.from === db.handle ? 'You: ' : isGroupKey(key) ? `${shortName(last.from)}: ` : '';
+  if (last.deleted) return who + 'Message deleted';
+  return who + mediaLabel(last.media, last.text);
+}
 function renderContacts() {
   const ul = $('contacts');
   ul.replaceChildren();
   const q = searchQuery();
-  const handles = Object.keys(db.contacts).sort((a, b) => lastTs(b) - lastTs(a))
-    .filter((h) => !q || h.toLowerCase().includes(q));
+  const all = chatKeys().filter((k) => !q || chatName(k).toLowerCase().includes(q) || k.toLowerCase().includes(q));
+  const archivedCount = orderChats(all, prefsOf(), lastTs, { archived: true }).length;
+  const handles = orderChats(all, prefsOf(), lastTs, { archived: showArchived });
+  if (showArchived || archivedCount) {
+    const row = el('li', 'archived-row');
+    row.append(el('span', '', showArchived ? '← Back to chats' : `Archived · ${archivedCount}`));
+    row.onclick = () => { showArchived = !showArchived; renderContacts(); };
+    ul.append(row);
+  }
+  let totalUnread = 0;
   for (const h of handles) {
+    const p = prefsOf()[h] || {};
     const li = el('li', h === active ? 'active' : '');
     const left = el('div', 'contact-main');
     const top = el('div', 'contact-top');
-    const name = el('div', 'contact-name', h);
-    if (db.contacts[h].verified) name.append(' ', el('span', 'verified', '✓'));
+    const name = el('div', 'contact-name', chatName(h));
+    if (db.contacts[h]?.verified) name.append(' ', el('span', 'verified', '✓'));
+    if (p.muted) name.append(' ', el('span', 'chat-flag', '🔕'));
+    if (p.pinned) name.append(' ', el('span', 'chat-flag', '📌'));
     const last = db.threads[h]?.filter((m) => m.from !== '@system').at(-1);
     const lastAny = db.threads[h]?.at(-1);
     top.append(name, el('span', 'contact-time', lastAny ? shortWhen(lastAny.ts) : ''));
     const bottom = el('div', 'contact-bottom');
-    const mine = last && last.from === db.handle;
-    bottom.append(el('div', 'preview', last ? (mine ? 'You: ' : '') + last.text : 'No messages yet'));
-    if (db.unread[h]) bottom.append(el('span', 'badge', String(db.unread[h])));
+    const typing = typingNow[h]?.until > Date.now();
+    bottom.append(el('div', 'preview' + (typing ? ' typing' : ''), typing ? (isGroupKey(h) ? `${shortName(typingNow[h].who)} is typing…` : 'typing…') : previewOf(h, last)));
+    if (db.unread[h]) bottom.append(el('span', 'badge' + (p.muted ? ' muted' : ''), String(db.unread[h])));
+    if (!p.muted) totalUnread += db.unread[h] || 0;
     left.append(top, bottom);
-    li.append(avatarEl(h), left);
+    li.append(chatAvatar(h), left);
     li.onclick = () => openThread(h);
+    bindChatMenu(li, h);
     ul.append(li);
   }
-  if (!handles.length) {
+  if (db.handle) document.title = `${totalUnread ? `(${totalUnread}) ` : ''}FabriC++ · ${db.handle}`;
+  if (!handles.length && !showArchived) {
     const hint = q
       ? (isValidHandle(normalizeHandle(q)) ? `No chats match. Press + to start a chat with ${normalizeHandle(q)}.` : 'No chats match.')
       : 'No chats yet. Type an address like @alex above and press +.';
@@ -771,7 +1000,14 @@ function dayLabel(ts) {
   if (d.toDateString() === y.toDateString()) return 'Yesterday';
   return d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long', ...(d.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) });
 }
-const lastTs = (h) => db.threads[h]?.at(-1)?.ts || db.contacts[h]?.addedAt || 0;
+const lastTs = (h) => db.threads[h]?.at(-1)?.ts || groupFor(h)?.created || db.contacts[h]?.addedAt || 0;
+function chatAvatar(key, cls = 'avatar') {
+  const g = groupFor(key);
+  if (!g) return avatarEl(key, cls);
+  const a = avatarEl('#' + g.name, cls + ' group');
+  a.textContent = (g.name.trim()[0] || '#').toUpperCase();
+  return a;
+}
 
 function renderMessages() {
   if (!active) return;
@@ -795,6 +1031,11 @@ function renderMessages() {
       ol.append(li);
       continue;
     }
+    if (!mine && isGroupKey(active)) {
+      const who = el('div', 'msg-from', m.from);
+      who.style.color = avatarColor(m.from);
+      li.append(who);
+    }
     if (m.forwarded) li.append(el('div', 'fwd-label', 'Forwarded'));
     if (m.reply) {
       const quote = el('button', 'quote');
@@ -804,6 +1045,7 @@ function renderMessages() {
       quote.onclick = (e) => { e.stopPropagation(); jumpTo(m.reply.id); };
       li.append(quote);
     }
+    if (m.media) li.append(mediaEl(m));
     const translated = !mine && m.tr?.text && !showOriginal.has(m.id);
     const flipped = m.sentTr && showOriginal.has(m.id); // a message sent translated, shown as written
     const shown = flipped ? m.sentTr.text : translated ? m.tr.text : m.text;
@@ -811,7 +1053,10 @@ function renderMessages() {
     else li.append(document.createTextNode(shown));
     const time = new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const ed = m.edited ? 'edited · ' : '';
-    li.append(el('div', 'meta', mine ? `${ed}${time} · ${m.status || ''}${m.sealed ? ' · sealed' : ''}` : ed + time));
+    const seen = mine && m.read && userPrefs().receipts !== false;
+    const meta = el('div', 'meta', mine ? `${ed}${time} · ${seen ? 'read' : m.status || ''}${m.sealed ? ' · sealed' : ''}` : ed + time);
+    if (mine) meta.prepend(el('span', 'ticks' + (seen ? ' read' : ''), seen || /^(delivered|queued)/.test(m.status || '') ? '✓✓ ' : /^sending|^offline/.test(m.status || '') ? '○ ' : /^failed/.test(m.status || '') ? '! ' : '✓ '));
+    li.append(meta);
     if (m.sentTr) {
       const lang = languageName(m.sentTr.to);
       const label = mine
@@ -1078,7 +1323,9 @@ $('ai-download').onclick = async () => {
 function renderKeyWarning() {
   const c = db.contacts[active];
   const box = $('key-warning');
-  $('call-buttons').classList.toggle('hidden', Boolean(c?.pendingAccount));
+  const g = groupFor(active);
+  $('call-buttons').classList.toggle('hidden', Boolean(g || c?.pendingAccount));
+  if (g) { box.classList.add('hidden'); $('composer').classList.toggle('hidden', !inGroup(g)); return; }
   if (!c?.pendingAccount) { box.classList.add('hidden'); $('composer').classList.remove('hidden'); return; }
   box.replaceChildren(
     el('div', '', `${active}'s account key changed. This can mean they started over on a new device without a backup — or that someone is intercepting. Messages are paused until you confirm their new safety number with them.`),
@@ -1103,6 +1350,7 @@ function renderKeyWarning() {
 /** "post-quantum" in the chat header when every device session with this contact is v3. */
 function renderPqBadge() {
   const badge = $('pq-badge');
+  if (!badge) return;
   const devices = active ? db.contacts[active]?.list?.payload?.devices || [] : [];
   const kinds = devices.map((d) => sessions?.sessionKind(deviceAddr(active, d.id))).filter(Boolean);
   badge.textContent = !kinds.length ? '' : kinds.every((k) => k === 'pq') ? ' · post-quantum' : ' · classic keys (post-quantum once both apps are up to date)';
@@ -1118,8 +1366,8 @@ async function openThread(h) {
   persist();
   $('empty').classList.add('hidden');
   $('thread').classList.remove('hidden');
-  $('peer').textContent = h;
-  $('peer-avatar').replaceWith(Object.assign(avatarEl(h), { id: 'peer-avatar' }));
+  $('peer-avatar').replaceWith(Object.assign(chatAvatar(h), { id: 'peer-avatar' }));
+  renderThreadHead();
   $('safety').classList.add('hidden');
   $('summary').classList.add('hidden');
   closeThreadMenu();
@@ -1128,6 +1376,9 @@ async function openThread(h) {
   if (composeCtx) clearComposeCtx();
   switchTab('chats');
   renderContacts(); renderMessages(); renderKeyWarning(); renderPqBadge();
+  sendReceipts(h);
+  if (isGroupKey(h)) { ensureContacts(groupFor(h)?.members || []); return; }
+  if (db.contacts[h]?.viaGroup) { delete db.contacts[h].viaGroup; persist(); }
   if (registered) {
     try { await refreshContact(h, { force: true }); } catch { /* offline or unknown: keep cached list */ }
     if (active === h) { renderKeyWarning(); renderMessages(); }
@@ -1136,7 +1387,28 @@ async function openThread(h) {
   if (!matchMedia('(pointer: coarse)').matches) $('text').focus();
 }
 
+/** Name, sub-line and the actions that make sense for this chat. */
+function renderThreadHead() {
+  if (!active) return;
+  const g = groupFor(active);
+  $('peer').textContent = chatName(active);
+  const status = $('peer-status');
+  if (g) {
+    status.textContent = inGroup(g) ? `${g.members.length} members · end-to-end encrypted` : 'You left this group';
+  } else if (!status.querySelector('#pq-badge')) {
+    status.replaceChildren(document.createTextNode('🔒 End-to-end encrypted'), Object.assign(el('span'), { id: 'pq-badge' }));
+    renderPqBadge();
+  }
+  $('group-info-btn').classList.toggle('hidden', !g);
+  $('show-safety').classList.toggle('hidden', Boolean(g));
+  const p = prefsOf()[active] || {};
+  $('mute-chat').textContent = p.muted ? 'Unmute notifications' : 'Mute notifications';
+  $('archive-chat').textContent = p.archived ? 'Unarchive chat' : 'Archive chat';
+  renderTyping();
+}
+
 async function showSafety() {
+  if (isGroupKey(active)) return;
   const box = $('safety');
   if (!box.classList.contains('hidden')) return box.classList.add('hidden');
   const c = db.contacts[active];
@@ -1266,6 +1538,7 @@ function setScreen(kind) {
 }
 
 function closeThread() {
+  if (rec) stopVoice(false);
   active = null;
   closeThreadMenu();
   closeThreadSearch();
@@ -1326,6 +1599,14 @@ function renderSettings() {
   $('settings-avatar').replaceWith(Object.assign(avatarEl(db.handle, 'avatar big'), { id: 'settings-avatar' }));
   $('settings-handle').textContent = db.handle;
   $('settings-device').textContent = `${db.deviceName}${db.primary ? ' · primary device' : ' · linked device'}`;
+  const p = userPrefs();
+  $('pref-receipts').checked = p.receipts !== false;
+  $('pref-typing').checked = p.typing !== false;
+  $('pref-notify').checked = Boolean(p.notify) && 'Notification' in window && Notification.permission === 'granted';
+  $('pref-notify').disabled = !('Notification' in window);
+  let theme = 'system';
+  try { theme = localStorage.getItem(THEME_KEY) || 'system'; } catch { /* */ }
+  $('pref-theme').value = theme;
 }
 
 // ---------- message actions: reply, react, copy, forward, edit, delete ----------
@@ -1367,7 +1648,7 @@ function openMsgMenu(m, li) {
     react.append(b);
   }
   react.classList.toggle('hidden', Boolean(m.deleted));
-  const show = { reply: !m.deleted, copy: !m.deleted, forward: !m.deleted, edit: mine && !m.deleted, 'delete-all': mine && !m.deleted, 'delete-me': true };
+  const show = { reply: !m.deleted, copy: !m.deleted && Boolean(m.text), forward: !m.deleted && (Boolean(m.text) || Boolean(m.media?.data)), edit: mine && !m.deleted && Boolean(m.text), 'delete-all': mine && !m.deleted, 'delete-me': true };
   for (const [k, on] of Object.entries(show)) $(`msg-${k}`).classList.toggle('hidden', !on);
   menu.classList.remove('hidden');
   // next to the message, kept on screen
@@ -1427,22 +1708,301 @@ function toast(text) {
 function openForward(m) {
   const list = $('fwd-list');
   list.replaceChildren();
-  const handles = Object.keys(db.contacts).filter((h) => db.contacts[h].list && !db.contacts[h].pendingAccount).sort((a, b) => lastTs(b) - lastTs(a));
+  const handles = chatKeys().filter((k) => (isGroupKey(k) ? inGroup(groupFor(k)) : db.contacts[k].list && !db.contacts[k].pendingAccount)).sort((a, b) => lastTs(b) - lastTs(a));
   if (!handles.length) list.append(el('li', 'contacts-empty', 'No contacts yet.'));
   for (const h of handles) {
     const b = el('button', 'fwd-to');
     b.type = 'button';
-    b.append(avatarEl(h), el('span', 'contact-name', h));
+    b.append(chatAvatar(h), el('span', 'contact-name', chatName(h)));
     b.onclick = async () => {
       $('fwd-dialog').close();
-      await sendText(m.text, null, { fwd: true }, h);
-      toast(`Forwarded to ${h}`);
+      await sendText(m.text, null, { fwd: true, ...(m.media?.data ? { media: m.media } : {}) }, h);
+      toast(`Forwarded to ${chatName(h)}`);
     };
     const item = el('li');
     item.append(b);
     list.append(item);
   }
   $('fwd-dialog').showModal();
+}
+
+// ---------- attachments: photos, files, voice messages ----------
+const blobUrls = new Map();
+function b64ToBytes(b64) { const bin = atob(b64); const out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; }
+function blobUrl(m) {
+  let u = blobUrls.get(m.id);
+  if (!u) { u = URL.createObjectURL(new Blob([b64ToBytes(m.media.data)], { type: m.media.mime })); blobUrls.set(m.id, u); }
+  return u;
+}
+function mediaEl(m) {
+  const md = m.media;
+  if (!md.data) return el('div', 'media-gone', `${mediaLabel(md)} · not on this device`);
+  if (md.type === 'image') {
+    const img = el('img', 'media-img');
+    img.alt = 'Photo';
+    img.src = `data:${md.mime};base64,${md.data}`; // mime checked against an image allowlist (shared/chat.js)
+    if (md.w && md.h) { img.width = md.w; img.height = md.h; }
+    img.onclick = (e) => { e.stopPropagation(); openViewer(img.src); };
+    return img;
+  }
+  if (md.type === 'audio') {
+    const box = el('div', 'media-audio');
+    const a = el('audio');
+    a.controls = true; a.preload = 'metadata'; a.src = blobUrl(m);
+    box.append(a);
+    if (md.dur) box.append(el('span', 'media-dur', fmtDuration(md.dur)));
+    return box;
+  }
+  const link = el('a', 'media-file');
+  link.href = blobUrl(m);
+  link.download = md.name;
+  link.append(el('span', 'file-icon', '📎'), el('span', 'file-name', md.name), el('span', 'file-size', fmtBytes(md.size)));
+  link.onclick = (e) => e.stopPropagation();
+  return link;
+}
+function openViewer(src) { $('viewer-img').src = src; $('viewer').classList.remove('hidden'); }
+function closeViewer() { $('viewer').classList.add('hidden'); $('viewer-img').removeAttribute('src'); }
+
+const blobB64 = (blob) => new Promise((resolve, reject) => {
+  const fr = new FileReader();
+  fr.onload = () => resolve(String(fr.result).split(',')[1] || '');
+  fr.onerror = () => reject(fr.error);
+  fr.readAsDataURL(blob);
+});
+/** A photo, scaled and recompressed until it fits in one encrypted message. */
+async function imageMedia(file) {
+  if (file.size <= MAX_MEDIA_BYTES && ['image/png', 'image/gif', 'image/webp', 'image/jpeg'].includes(file.type)) {
+    const bmp = await createImageBitmap(file).catch(() => null);
+    return { type: 'image', mime: file.type, name: file.name, data: await blobB64(file), ...(bmp ? { w: bmp.width, h: bmp.height } : {}) };
+  }
+  const bmp = await createImageBitmap(file);
+  let scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+  let q = 0.82;
+  for (let i = 0; i < 10; i++) {
+    const w = Math.max(1, Math.round(bmp.width * scale)), h = Math.max(1, Math.round(bmp.height * scale));
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    c.getContext('2d').drawImage(bmp, 0, 0, w, h);
+    const blob = await new Promise((res) => c.toBlob(res, 'image/jpeg', q));
+    if (blob && blob.size <= MAX_MEDIA_BYTES) return { type: 'image', mime: 'image/jpeg', name: 'photo.jpg', data: await blobB64(blob), w, h };
+    if (q > 0.5) q -= 0.12; else scale *= 0.75;
+  }
+  throw new Error('That photo is too large to send.');
+}
+async function sendAttachment(file) {
+  if (!active || !file) return;
+  // what goes with it is taken now: compressing a photo takes a moment, and the box may change
+  const to = active;
+  const extra = {};
+  if (composeCtx?.mode === 'reply') { extra.reply = composeCtx.quote; clearComposeCtx(); }
+  const caption = composeCtx?.mode === 'edit' ? '' : $('text').value.trim();
+  if (caption) { $('text').value = ''; growText(); }
+  try {
+    let media;
+    if (file.type.startsWith('image/') && file.type !== 'image/svg+xml') media = await imageMedia(file);
+    else {
+      if (file.size > MAX_MEDIA_BYTES) throw new Error(`Files up to ${fmtBytes(MAX_MEDIA_BYTES)} for now.`);
+      media = { type: 'file', mime: file.type || 'application/octet-stream', name: file.name, data: await blobB64(file) };
+    }
+    await sendText(caption, null, { ...extra, media }, to);
+  } catch (e) {
+    if (caption && !$('text').value) { $('text').value = caption; growText(); } // give the caption back
+    toast(e.message || 'Could not send that file.');
+  }
+}
+
+const VOICE_LIMIT_S = 60; // at 16 kbit/s a minute fits in one encrypted message
+let rec = null;
+async function startVoice() {
+  if (rec || !active) return;
+  if (!window.MediaRecorder) return toast('Voice messages need a newer browser.');
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); } catch { return toast('Microphone not available.'); }
+  const mime = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4'].find((m) => MediaRecorder.isTypeSupported?.(m)) || '';
+  const mr = new MediaRecorder(stream, { ...(mime ? { mimeType: mime } : {}), audioBitsPerSecond: 16000 });
+  const chunks = [];
+  const to = active;
+  mr.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  rec = { mr, stream, started: Date.now(), send: false, timer: setInterval(tickVoice, 250) };
+  mr.onstop = async () => {
+    const { send, started } = rec;
+    clearInterval(rec.timer);
+    stream.getTracks().forEach((t) => t.stop());
+    rec = null;
+    $('rec-bar').classList.add('hidden');
+    $('composer').classList.remove('hidden');
+    if (!send) return;
+    const blob = new Blob(chunks, { type: (mr.mimeType || mime || 'audio/webm').replace(/\s+/g, '') });
+    const dur = (Date.now() - started) / 1000;
+    if (dur < 0.7) return toast('Hold on a little longer to record.');
+    if (blob.size > MAX_MEDIA_BYTES) return toast('That recording is too long to send.');
+    await sendText('', null, { media: { type: 'audio', mime: blob.type, name: 'voice.webm', data: await blobB64(blob), dur } }, to);
+  };
+  mr.start(250);
+  $('rec-time').textContent = '0:00';
+  $('rec-bar').classList.remove('hidden');
+  $('composer').classList.add('hidden');
+}
+function tickVoice() {
+  if (!rec) return;
+  const s = (Date.now() - rec.started) / 1000;
+  $('rec-time').textContent = `${fmtDuration(s)} / ${fmtDuration(VOICE_LIMIT_S)}`;
+  if (s >= VOICE_LIMIT_S) stopVoice(true);
+}
+function stopVoice(send) { if (!rec || rec.mr.state === 'inactive') return; rec.send = send; rec.mr.stop(); }
+
+// ---------- chat list actions: pin, mute, archive, read, delete ----------
+let menuChat = null;
+function bindChatMenu(li, key) {
+  li.addEventListener('contextmenu', (e) => { e.preventDefault(); openChatMenu(key, li); });
+  let timer = 0, sx = 0, sy = 0, fired = false;
+  li.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse') return;
+    sx = e.clientX; sy = e.clientY; fired = false;
+    timer = setTimeout(() => { timer = 0; fired = true; navigator.vibrate?.(15); openChatMenu(key, li); }, 500);
+  });
+  const cancel = () => { clearTimeout(timer); timer = 0; };
+  li.addEventListener('pointerup', cancel);
+  li.addEventListener('pointercancel', cancel);
+  li.addEventListener('pointermove', (e) => { if (timer && Math.hypot(e.clientX - sx, e.clientY - sy) > 10) cancel(); });
+  li.addEventListener('click', (e) => { if (fired) { e.stopImmediatePropagation(); fired = false; } }, true);
+}
+function openChatMenu(key, li) {
+  menuChat = key;
+  const p = prefsOf()[key] || {};
+  $('chat-pin').textContent = p.pinned ? 'Unpin chat' : 'Pin chat';
+  $('chat-mute').textContent = p.muted ? 'Unmute' : 'Mute';
+  $('chat-archive').textContent = p.archived ? 'Unarchive' : 'Archive';
+  $('chat-read').textContent = db.unread[key] ? 'Mark as read' : 'Mark as unread';
+  $('chat-delete').textContent = isGroupKey(key) && inGroup(groupFor(key)) ? 'Leave and delete group' : 'Delete chat';
+  const menu = $('chat-menu');
+  menu.classList.remove('hidden');
+  const rc = li.getBoundingClientRect();
+  const w = menu.offsetWidth, h = menu.offsetHeight;
+  let top = rc.bottom - 4;
+  if (top + h > innerHeight - 8) top = Math.max(8, rc.top - h + 4);
+  menu.style.top = `${top}px`;
+  menu.style.left = `${Math.min(Math.max(8, rc.left + 40), innerWidth - w - 8)}px`;
+  menu.querySelector('button')?.focus();
+}
+function closeChatMenu() { $('chat-menu').classList.add('hidden'); }
+function setChatPref(key, field, on) {
+  const p = (prefsOf()[key] ??= {});
+  if (field === 'pinned' && on) {
+    const pinned = Object.values(prefsOf()).filter((x) => x.pinned).length;
+    if (pinned >= MAX_PINNED) { toast(`You can pin up to ${MAX_PINNED} chats.`); return; }
+    p.pinned = Date.now();
+  } else if (on) p[field] = true; else delete p[field];
+  if (field === 'archived' && on) delete p.pinned;
+  if (!Object.keys(p).length) delete prefsOf()[key];
+  persist(); renderContacts();
+  if (key === active) renderThreadHead();
+}
+async function deleteChat(key) {
+  const g = groupFor(key);
+  if (!confirm(g ? `Leave “${g.name}” and delete it from this device?` : `Delete the chat with ${key} from this device? They keep their copy.`)) return;
+  if (g && inGroup(g)) await leaveGroup(key);
+  if (g) delete groupsOf()[g.id];
+  else if (db.contacts[key]) db.contacts[key].viaGroup = true; // stays a known contact, out of the list
+  delete db.threads[key]; delete db.unread[key]; delete prefsOf()[key];
+  if (active === key) closeThread();
+  persist(); renderContacts();
+}
+
+// ---------- groups ----------
+function contactPicker(exclude = []) {
+  const ul = $('group-pick');
+  ul.replaceChildren();
+  const hs = Object.keys(db.contacts).filter((h) => db.contacts[h].list && !db.contacts[h].pendingAccount && !exclude.includes(h)).sort((a, b) => lastTs(b) - lastTs(a));
+  if (!hs.length) ul.append(el('li', 'contacts-empty', 'Start a chat with someone first, then add them here.'));
+  for (const h of hs) {
+    const li = el('li');
+    const lab = el('label', 'pick');
+    const cb = el('input');
+    cb.type = 'checkbox'; cb.value = h;
+    lab.append(cb, avatarEl(h), el('span', 'contact-name', h));
+    li.append(lab);
+    ul.append(li);
+  }
+}
+let groupDialogMode = 'create';
+function openNewGroup() {
+  groupDialogMode = 'create';
+  $('group-dialog-title').textContent = 'New group';
+  $('group-create').textContent = 'Create group';
+  $('group-name').closest('.field').classList.remove('hidden');
+  $('group-name').value = '';
+  $('group-error').textContent = '';
+  contactPicker();
+  $('group-dialog').showModal();
+  $('group-name').focus();
+}
+async function createGroup(name, members) {
+  const id = newMessageId();
+  const g = newGroup(id, name, db.handle, members);
+  groupsOf()[id] = { ...g, created: Date.now() };
+  const key = groupKey(id);
+  db.threads[key] = [];
+  systemLine(key, `You created “${g.name}”`);
+  persist();
+  await sendControl(key, { kind: 'group', op: 'create', group: g });
+  openThread(key);
+}
+async function addToGroup(key, members) {
+  const g = groupFor(key);
+  if (!inGroup(g) || !members.length) return;
+  await ensureContacts(members);
+  for (const h of members) if (!g.members.includes(h)) g.members.push(h);
+  systemLine(key, `You added ${members.join(', ')}`);
+  persist();
+  await sendControl(key, { kind: 'group', op: 'add', group: { id: g.id, name: g.name, members: g.members } });
+  renderThreadHead(); renderMessages(); renderGroupInfo();
+}
+async function renameGroup(key, name) {
+  const g = groupFor(key);
+  const clean = name.trim().slice(0, 64);
+  if (!inGroup(g) || !clean || clean === g.name) return;
+  g.name = clean;
+  systemLine(key, `You renamed the group to “${clean}”`);
+  persist();
+  await sendControl(key, { kind: 'group', op: 'rename', group: { id: g.id, name: g.name, members: g.members } });
+  renderThreadHead(); renderMessages(); renderContacts();
+}
+async function leaveGroup(key) {
+  const g = groupFor(key);
+  if (!inGroup(g)) return;
+  await sendControl(key, { kind: 'group', op: 'leave', group: { id: g.id, name: g.name, members: g.members } });
+  g.members = g.members.filter((h) => h !== db.handle);
+  g.left = true;
+  systemLine(key, 'You left');
+  persist();
+  if (active === key) { renderThreadHead(); renderKeyWarning(); renderMessages(); }
+  renderContacts();
+}
+function renderGroupInfo() {
+  const g = groupFor(active);
+  if (!g) return;
+  $('ginfo-name').value = g.name;
+  $('ginfo-count').textContent = `${g.members.length} members`;
+  const ul = $('ginfo-members');
+  ul.replaceChildren();
+  for (const h of g.members) {
+    const li = el('li', 'ginfo-member');
+    li.append(avatarEl(h), el('span', 'contact-name', h === db.handle ? `${h} (you)` : h));
+    ul.append(li);
+  }
+  const me = inGroup(g);
+  for (const id of ['ginfo-rename', 'ginfo-add', 'ginfo-leave']) $(id).disabled = !me;
+}
+
+// ---------- notifications ----------
+function notifyIncoming(key, entry) {
+  if (prefsOf()[key]?.muted || !userPrefs().notify || !document.hidden) return;
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  try {
+    const n = new Notification(chatName(key), { body: isGroupKey(key) ? `${shortName(entry.from)}: ${mediaLabel(entry.media, entry.text)}` : mediaLabel(entry.media, entry.text), tag: key });
+    n.onclick = () => { window.focus(); openThread(key); n.close(); };
+  } catch { /* not allowed here (e.g. the Android app) */ }
 }
 
 // ---------- thread menu and in-chat search ----------
@@ -1610,6 +2170,7 @@ async function joinLinked() {
   await startDevice(keys, {
     handle: data.handle, deviceId, deviceName, primary: false, self: { list: data.list },
     contacts: data.contacts || {}, threads: data.threads || {},
+    groups: data.groups || {}, chatPrefs: data.chatPrefs || {}, ...(data.prefs ? { prefs: data.prefs } : {}),
   });
 }
 
@@ -1674,16 +2235,19 @@ async function onMailbox(from, payload) {
 }
 
 /** History and contacts for a new device: no sessions, no pending copies. */
-function portableState() {
+function portableState({ media = false } = {}) {
   const contacts = {};
   for (const [h, c] of Object.entries(db.contacts)) {
     if (c.account && c.list) contacts[h] = { account: c.account, list: c.list, verified: c.verified, addedAt: c.addedAt, dk: c.dk };
   }
   const threads = {};
   for (const [h, t] of Object.entries(db.threads)) {
-    threads[h] = t.slice(-HISTORY_SNAPSHOT).map(({ out, anyQueued, okCopies, failedCopies, lastError, ...m }) => m);
+    threads[h] = t.slice(-HISTORY_SNAPSHOT).map(({ out, anyQueued, okCopies, failedCopies, lastError, ...m }) => {
+      if (m.media && !media) { const { data, ...rest } = m.media; return { ...m, media: rest }; }
+      return m;
+    });
   }
-  return { contacts, threads };
+  return { contacts, threads, groups: db.groups || {}, chatPrefs: db.chatPrefs || {}, prefs: db.prefs };
 }
 
 /** Primary: start linking the device behind a scanned or pasted code. */
@@ -1856,7 +2420,7 @@ async function makeBackup() {
   if (typed) parseRecoveryKey(typed); // throws a readable error for a mistyped key
   const accountKey = await vault.exportIdentityPart('account', $('backup-pass').value || null);
   const recovery = typed || newRecoveryKey();
-  const file = await sealBackup(recovery, { v: 3, handle: db.handle, account: accountKey, ...portableState() });
+  const file = await sealBackup(recovery, { v: 3, handle: db.handle, account: accountKey, ...portableState({ media: true }) });
   $('backup-pass').value = '';
   $('backup-reuse').value = '';
   if (typed) {
@@ -1914,6 +2478,7 @@ $('restore-form').onsubmit = async (e) => {
     await startDevice({ ...keys, account: accountKey }, {
       handle: content.handle, deviceId, deviceName, primary: true, self: { list },
       contacts: content.contacts || {}, threads: content.threads || {},
+      groups: content.groups || {}, chatPrefs: content.chatPrefs || {}, ...(content.prefs ? { prefs: content.prefs } : {}),
       ...(cloudBackup && cloudWho ? { cid: cloudWho } : {}),
     });
     $('restore-key').value = '';
@@ -2328,13 +2893,90 @@ $('thread-menu').addEventListener('click', () => closeThreadMenu());
 document.addEventListener('click', (e) => { if (!e.target.closest('.menu-wrap')) closeThreadMenu(); });
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  if (!$('msg-menu').classList.contains('hidden')) closeMsgMenu();
+  if (!$('viewer').classList.contains('hidden')) closeViewer();
+  else if (!$('chat-menu').classList.contains('hidden')) closeChatMenu();
+  else if (rec) stopVoice(false);
+  else if (!$('msg-menu').classList.contains('hidden')) closeMsgMenu();
   else if (composeCtx) clearComposeCtx();
   else if (!$('thread-menu').classList.contains('hidden')) closeThreadMenu();
   else if (!$('thread-search').classList.contains('hidden')) closeThreadSearch();
 });
 $('thread-search-btn').onclick = () => openThreadSearch();
-$('msg-reply').onclick = () => { const m = menuMsg; closeMsgMenu(); if (m) setComposeCtx({ mode: 'reply', quote: quoteOf(m) }); };
+$('attach').onclick = () => $('attach-input').click();
+$('attach-input').onchange = (e) => { const file = e.target.files?.[0]; e.target.value = ''; sendAttachment(file); };
+$('mic').onclick = startVoice;
+$('rec-cancel').onclick = () => stopVoice(false);
+$('rec-send').onclick = () => stopVoice(true);
+$('text').addEventListener('input', noteTyping);
+$('messages').addEventListener('dragover', (e) => { if (active) e.preventDefault(); });
+$('messages').addEventListener('drop', (e) => { e.preventDefault(); sendAttachment(e.dataTransfer?.files?.[0]); });
+$('text').addEventListener('paste', (e) => {
+  const file = [...(e.clipboardData?.files || [])][0];
+  if (file) { e.preventDefault(); sendAttachment(file); }
+});
+$('viewer').onclick = closeViewer;
+$('new-group').onclick = openNewGroup;
+$('group-cancel').onclick = () => $('group-dialog').close();
+$('group-create').onclick = async () => {
+  const picked = [...$('group-pick').querySelectorAll('input:checked')].map((i) => i.value);
+  try {
+    if (groupDialogMode === 'add') { $('group-dialog').close(); await addToGroup(active, picked); return; }
+    if (!picked.length) throw new Error('Pick at least one person.');
+    $('group-dialog').close();
+    await createGroup($('group-name').value, picked);
+  } catch (err) { $('group-error').textContent = err.message; if (!$('group-dialog').open) toast(err.message); }
+};
+$('group-info-btn').onclick = () => { renderGroupInfo(); $('ginfo-dialog').showModal(); };
+$('ginfo-close').onclick = () => $('ginfo-dialog').close();
+$('ginfo-rename').onclick = () => renameGroup(active, $('ginfo-name').value);
+$('ginfo-add').onclick = () => {
+  $('ginfo-dialog').close();
+  groupDialogMode = 'add';
+  $('group-dialog-title').textContent = `Add to ${chatName(active)}`;
+  $('group-create').textContent = 'Add';
+  $('group-name').closest('.field').classList.add('hidden');
+  $('group-error').textContent = '';
+  contactPicker(groupFor(active)?.members || []);
+  $('group-dialog').showModal();
+};
+$('ginfo-leave').onclick = async () => {
+  if (!confirm(`Leave “${chatName(active)}”? You'll stop getting its messages.`)) return;
+  $('ginfo-dialog').close();
+  await leaveGroup(active);
+};
+$('mute-chat').onclick = () => active && setChatPref(active, 'muted', !prefsOf()[active]?.muted);
+$('archive-chat').onclick = () => {
+  if (!active) return;
+  const on = !prefsOf()[active]?.archived;
+  setChatPref(active, 'archived', on);
+  if (on) { closeThread(); toast('Chat archived'); }
+};
+$('chat-pin').onclick = () => { const k = menuChat; closeChatMenu(); if (k) setChatPref(k, 'pinned', !prefsOf()[k]?.pinned); };
+$('chat-mute').onclick = () => { const k = menuChat; closeChatMenu(); if (k) setChatPref(k, 'muted', !prefsOf()[k]?.muted); };
+$('chat-archive').onclick = () => { const k = menuChat; closeChatMenu(); if (k) setChatPref(k, 'archived', !prefsOf()[k]?.archived); };
+$('chat-read').onclick = () => {
+  const k = menuChat; closeChatMenu();
+  if (!k) return;
+  if (db.unread[k]) { delete db.unread[k]; sendReceipts(k); } else db.unread[k] = 1;
+  persist(); renderContacts();
+};
+$('chat-delete').onclick = () => { const k = menuChat; closeChatMenu(); if (k) deleteChat(k); };
+document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#chat-menu')) closeChatMenu(); }, true);
+$('pref-receipts').onchange = (e) => { userPrefs().receipts = e.target.checked; persist(); if (active) renderMessages(); };
+$('pref-typing').onchange = (e) => { userPrefs().typing = e.target.checked; persist(); };
+$('pref-notify').onchange = async (e) => {
+  let on = e.target.checked;
+  if (on && Notification.permission !== 'granted') on = (await Notification.requestPermission().catch(() => 'denied')) === 'granted';
+  userPrefs().notify = on;
+  e.target.checked = on;
+  if (!on && e.target.checked !== on) toast('Notifications are blocked in this browser.');
+  persist();
+};
+$('pref-theme').onchange = (e) => applyTheme(e.target.value);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && active) { delete db.unread[active]; sendReceipts(active); renderContacts(); }
+});
+$('msg-reply').onclick = () => { const m = menuMsg; closeMsgMenu(); if (m) setComposeCtx({ mode: 'reply', quote: quoteOf({ ...m, text: mediaLabel(m.media, m.text) }) }); };
 $('msg-copy').onclick = () => { const m = menuMsg; closeMsgMenu(); if (m) copyText(m.text); };
 $('msg-forward').onclick = () => { const m = menuMsg; closeMsgMenu(); if (m) openForward(m); };
 $('msg-edit').onclick = () => {
@@ -2361,7 +3003,7 @@ $('thread-search-close').onclick = closeThreadSearch;
 $('thread-search').onsubmit = (e) => e.preventDefault();
 $('thread-search-q').oninput = (e) => { threadQuery = e.target.value.trim().toLowerCase(); renderMessages(); };
 $('clear-chat').onclick = () => {
-  if (!active || !confirm(`Delete every message with ${active} from this device? They keep their copy.`)) return;
+  if (!active || !confirm(`Delete every message in ${chatName(active)} from this device? Others keep their copy.`)) return;
   db.threads[active] = [];
   persist(); renderMessages(); renderContacts();
 };

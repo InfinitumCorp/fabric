@@ -104,6 +104,7 @@
         <div class="side-top">
           <div class="brand small">FabriC++<sup>™</sup></div>
           <div class="icon-row">
+            <button type="button" id="new-group" class="icon-btn" title="New group" aria-label="New group"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 19c0-3 3-5 6-5s6 2 6 5M16 5a3 3 0 010 6M18 14c2 .6 3 2.4 3 5"/></svg></button>
             <button type="button" id="new-chat" class="icon-btn" title="New chat" aria-label="New chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg></button>
             <button type="button" data-tab="settings" class="icon-btn tab-link" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></button>
           </div>
@@ -139,7 +140,7 @@
             <div id="peer-avatar" class="avatar" aria-hidden="true"></div>
             <div class="peer-box">
               <div id="peer" class="peer"></div>
-              <div class="peer-sub muted small">🔒 End-to-end encrypted<span id="pq-badge"></span></div>
+              <div class="peer-sub muted small"><span id="peer-status">🔒 End-to-end encrypted<span id="pq-badge"></span></span><span id="typing" class="typing hidden"></span></div>
             </div>
             <div class="head-actions">
               <span id="call-buttons">
@@ -153,6 +154,9 @@
                   <button id="translate-toggle" type="button" role="menuitem" title="Translate incoming messages on this device" aria-pressed="false">Translate</button>
                   <button id="summarize" type="button" role="menuitem">Summarize on device</button>
                   <button id="show-safety" type="button" role="menuitem">Safety number</button>
+                  <button type="button" id="group-info-btn" class="hidden" role="menuitem">Group info</button>
+                  <button type="button" id="mute-chat" role="menuitem">Mute notifications</button>
+                  <button type="button" id="archive-chat" role="menuitem">Archive chat</button>
                   <button type="button" id="clear-chat" role="menuitem">Clear chat on this device</button>
                 </div>
               </div>
@@ -174,9 +178,17 @@
             <div class="compose-ctx-body"><strong id="compose-ctx-label"></strong><span id="compose-ctx-text"></span></div>
             <button id="compose-ctx-close" class="icon-btn" type="button" title="Cancel" aria-label="Cancel">✕</button>
           </div>
+          <div id="rec-bar" class="rec-bar hidden" aria-live="polite">
+            <span class="rec-dot" aria-hidden="true"></span><span id="rec-time">0:00</span><span class="muted small">Recording voice message</span>
+            <button id="rec-cancel" class="ghost" type="button">Cancel</button>
+            <button id="rec-send" class="primary" type="button">Send</button>
+          </div>
           <form id="composer" class="composer">
+            <button id="attach" class="icon-btn" type="button" title="Photo or file" aria-label="Attach a photo or file"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11l-8 8a5 5 0 01-7-7l8-8a3.5 3.5 0 015 5l-8 8a2 2 0 01-3-3l7-7"/></svg></button>
+            <input id="attach-input" type="file" class="hidden" />
             <textarea id="text" rows="1" autocomplete="off" placeholder="Message" maxlength="4000" aria-label="Message"></textarea>
             <select id="translate-out" title="Translate what you send, on this device" aria-label="Send in"><option value="">As written</option></select>
+            <button id="mic" class="icon-btn" type="button" title="Voice message" aria-label="Record a voice message"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg></button>
             <button class="send-btn" type="submit" title="Send" aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12l16-8-6 16-2-6z"/></svg></button>
           </form>
         </div>
@@ -203,6 +215,13 @@
               <div id="settings-handle" class="peer"></div>
               <div id="settings-device" class="muted small"></div>
             </div>
+          </div>
+          <div class="chat-prefs" id="chat-prefs">
+            <h3 class="eyebrow">Chats</h3>
+            <label class="pref"><input type="checkbox" id="pref-receipts" /><span>Read receipts<small>If off, you won't send or see read receipts.</small></span></label>
+            <label class="pref"><input type="checkbox" id="pref-typing" /><span>Typing indicator<small>Let people see when you're writing to them.</small></span></label>
+            <label class="pref"><input type="checkbox" id="pref-notify" /><span>Notifications<small>New messages while the app is in the background. Muted chats stay quiet.</small></span></label>
+            <label class="pref pref-select"><span>Theme</span><select id="pref-theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
           </div>
           <ul class="settings-list">
             <li><button type="button" data-go="security" data-focus="sec-card"><span>Privacy and security</span><small>Passphrase, app lock, safety numbers</small></button></li>
@@ -464,6 +483,40 @@
     <ul id="fwd-list" class="fwd-list"></ul>
     <button id="fwd-cancel" class="ghost" type="button">Cancel</button>
   </dialog>
+
+  <div id="chat-menu" class="msg-menu hidden" role="menu" aria-label="Chat actions">
+    <button id="chat-pin" type="button" role="menuitem">Pin chat</button>
+    <button id="chat-mute" type="button" role="menuitem">Mute</button>
+    <button id="chat-archive" type="button" role="menuitem">Archive</button>
+    <button id="chat-read" type="button" role="menuitem">Mark as read</button>
+    <button id="chat-delete" class="danger-text" type="button" role="menuitem">Delete chat</button>
+  </div>
+
+  <dialog id="group-dialog" class="fwd-dialog" aria-label="New group">
+    <h3 id="group-dialog-title">New group</h3>
+    <label class="field"><span>Group name</span><input id="group-name" maxlength="64" autocomplete="off" placeholder="Team" /></label>
+    <div class="eyebrow" id="group-pick-label">Members</div>
+    <ul id="group-pick" class="fwd-list pick-list"></ul>
+    <p id="group-error" class="error small"></p>
+    <div class="dialog-actions">
+      <button id="group-cancel" class="ghost" type="button">Cancel</button>
+      <button id="group-create" class="primary" type="button">Create group</button>
+    </div>
+  </dialog>
+
+  <dialog id="ginfo-dialog" class="fwd-dialog" aria-label="Group info">
+    <h3>Group info</h3>
+    <label class="field"><span>Name</span><span class="row-inline"><input id="ginfo-name" maxlength="64" autocomplete="off" /><button id="ginfo-rename" class="ghost" type="button">Save</button></span></label>
+    <div class="eyebrow" id="ginfo-count">Members</div>
+    <ul id="ginfo-members" class="fwd-list"></ul>
+    <div class="dialog-actions">
+      <button id="ginfo-add" class="ghost" type="button">Add members</button>
+      <button id="ginfo-leave" class="danger" type="button">Leave group</button>
+      <button id="ginfo-close" class="ghost" type="button">Close</button>
+    </div>
+  </dialog>
+
+  <div id="viewer" class="viewer hidden" role="dialog" aria-label="Photo"><img id="viewer-img" alt="Photo" /></div>
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 

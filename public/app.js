@@ -31,9 +31,9 @@ import {
 const PROFILE = new URLSearchParams(location.search).get('profile') || 'default';
 const LEGACY_KEY = `fabric:v2:${PROFILE}`; // v0.2 kept everything in plain localStorage; migrated once
 const vault = new Vault(idbBackend(`fabric-${PROFILE}`));
-const THEME_KEY = 'fabric-theme';
+const THEME_KEY = 'fabric-theme-v2'; // v1 stored 'system' for everyone; white is the default now
 function applyTheme(t) {
-  const theme = ['light', 'dark'].includes(t) ? t : 'system';
+  const theme = ['dark', 'system'].includes(t) ? t : 'light';
   if (theme === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = theme;
   try { localStorage.setItem(THEME_KEY, theme); } catch { /* storage off: still applied for now */ }
   const dark = theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -1113,6 +1113,13 @@ function renderTranslateOut() {
   sel.replaceChildren(new Option('As written', ''));
   for (const l of langs) sel.append(new Option(`In ${languageName(l)}${l === theirs ? ' (theirs)' : ''}`, l));
   sel.value = want;
+  updateTrBadge();
+}
+function updateTrBadge() {
+  const v = $('translate-out').value;
+  $('tr-code').textContent = v.toUpperCase();
+  $('tr-code').classList.toggle('hidden', !v);
+  $('translate-out').closest('.tr-pick').classList.toggle('on', Boolean(v));
 }
 
 function closeOutPreview() { $('out-preview').classList.add('hidden'); $('out-preview').replaceChildren(); }
@@ -1604,8 +1611,8 @@ function renderSettings() {
   $('pref-typing').checked = p.typing !== false;
   $('pref-notify').checked = Boolean(p.notify) && 'Notification' in window && Notification.permission === 'granted';
   $('pref-notify').disabled = !('Notification' in window);
-  let theme = 'system';
-  try { theme = localStorage.getItem(THEME_KEY) || 'system'; } catch { /* */ }
+  let theme = 'light';
+  try { theme = localStorage.getItem(THEME_KEY) || 'light'; } catch { /* */ }
   $('pref-theme').value = theme;
 }
 
@@ -2003,6 +2010,36 @@ function notifyIncoming(key, entry) {
     const n = new Notification(chatName(key), { body: isGroupKey(key) ? `${shortName(entry.from)}: ${mediaLabel(entry.media, entry.text)}` : mediaLabel(entry.media, entry.text), tag: key });
     n.onclick = () => { window.focus(); openThread(key); n.close(); };
   } catch { /* not allowed here (e.g. the Android app) */ }
+}
+
+// ---------- New: message, voice or video call, group, phone number ----------
+function openNewSheet() { $('new-sheet').showModal(); }
+let pickHandler = null;
+function openPicker(title, onPick) {
+  $('pick-title').textContent = title;
+  const ul = $('pick-list');
+  ul.replaceChildren();
+  const hs = Object.keys(db.contacts).filter((h) => db.contacts[h].list && !db.contacts[h].pendingAccount && !db.contacts[h].viaGroup).sort((a, b) => lastTs(b) - lastTs(a));
+  if (!hs.length) ul.append(el('li', 'contacts-empty', 'No contacts yet. Start a chat with someone by their @name first.'));
+  for (const h of hs) {
+    const b = el('button', 'fwd-to');
+    b.type = 'button';
+    b.append(avatarEl(h), el('span', 'contact-name', h));
+    b.onclick = () => { $('pick-dialog').close(); onPick(h); };
+    const li = el('li');
+    li.append(b);
+    ul.append(li);
+  }
+  pickHandler = onPick;
+  $('pick-dialog').showModal();
+}
+function startNew(kind) {
+  $('new-sheet').close();
+  if (kind === 'text') return $('new-chat').click();
+  if (kind === 'voice') return openPicker('Voice call', (h) => calls?.start(h, false));
+  if (kind === 'video') return openPicker('Video call', (h) => calls?.start(h, true));
+  if (kind === 'group') return openNewGroup();
+  if (kind === 'phone') return switchTab('phone');
 }
 
 // ---------- thread menu and in-chat search ----------
@@ -2860,6 +2897,7 @@ $('translate-out').onchange = (e) => {
   if (!active) return;
   const v = e.target.value;
   if (LANG_RE.test(v)) aiPrefs().out[active] = v; else delete aiPrefs().out[active];
+  updateTrBadge();
   persist();
   closeOutPreview();
   if (v) wsSend({ type: 'feature', feature: 'translate_out' }); // counted only if Product research is opted in
@@ -2916,6 +2954,10 @@ $('text').addEventListener('paste', (e) => {
 });
 $('viewer').onclick = closeViewer;
 $('new-group').onclick = openNewGroup;
+$('new-action').onclick = openNewSheet;
+for (const b of document.querySelectorAll('[data-new]')) b.onclick = () => startNew(b.dataset.new);
+$('new-sheet').addEventListener('click', (e) => { if (e.target === $('new-sheet')) $('new-sheet').close(); }); // tap outside
+$('pick-cancel').onclick = () => $('pick-dialog').close();
 $('group-cancel').onclick = () => $('group-dialog').close();
 $('group-create').onclick = async () => {
   const picked = [...$('group-pick').querySelectorAll('input:checked')].map((i) => i.value);
@@ -3014,7 +3056,12 @@ $('text').addEventListener('keydown', (e) => {
     $('composer').requestSubmit();
   }
 });
-const growText = () => { const t = $('text'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 140) + 'px'; };
+const growText = () => {
+  const t = $('text');
+  t.style.height = 'auto';
+  t.style.height = Math.min(t.scrollHeight, 140) + 'px';
+  $('composer').classList.toggle('has-text', Boolean(t.value.trim()));
+};
 $('text').addEventListener('input', growText);
 $('composer').addEventListener('submit', () => setTimeout(growText));
 

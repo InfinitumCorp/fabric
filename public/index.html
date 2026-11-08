@@ -115,6 +115,7 @@
       <nav class="tabs" aria-label="Sections">
         <button data-tab="chats" class="tab active"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg><span>Chats</span></button>
         <button data-tab="calls" class="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a1 1 0 01-1 1A16 16 0 014 5a1 1 0 011-1z"/></svg><span>Calls</span></button>
+        <button type="button" id="new-action" class="tab tab-new" aria-haspopup="dialog" title="New message, call or group"><span class="new-plus"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span><span>New</span></button>
         <button data-tab="phone" class="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2" width="10" height="20"/><path d="M11 18h2"/></svg><span>Phone</span></button>
         <button data-tab="settings" class="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg><span>Settings</span></button>
       </nav>
@@ -187,7 +188,11 @@
             <button id="attach" class="icon-btn" type="button" title="Photo or file" aria-label="Attach a photo or file"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11l-8 8a5 5 0 01-7-7l8-8a3.5 3.5 0 015 5l-8 8a2 2 0 01-3-3l7-7"/></svg></button>
             <input id="attach-input" type="file" class="hidden" />
             <textarea id="text" rows="1" autocomplete="off" placeholder="Message" maxlength="4000" aria-label="Message"></textarea>
-            <select id="translate-out" title="Translate what you send, on this device" aria-label="Send in"><option value="">As written</option></select>
+            <label class="tr-pick icon-btn" title="Send in another language (translated on this device)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h9M8.5 3v2M6 5c0 4 3 7 6 8M11 5c0 4-3 7-7 8M13 21l4-10 4 10M14.5 17h5"/></svg>
+              <span id="tr-code" class="tr-code hidden"></span>
+              <select id="translate-out" aria-label="Send in"><option value="">As written</option></select>
+            </label>
             <button id="mic" class="icon-btn" type="button" title="Voice message" aria-label="Record a voice message"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg></button>
             <button class="send-btn" type="submit" title="Send" aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12l16-8-6 16-2-6z"/></svg></button>
           </form>
@@ -221,7 +226,7 @@
             <label class="pref"><input type="checkbox" id="pref-receipts" /><span>Read receipts<small>If off, you won't send or see read receipts.</small></span></label>
             <label class="pref"><input type="checkbox" id="pref-typing" /><span>Typing indicator<small>Let people see when you're writing to them.</small></span></label>
             <label class="pref"><input type="checkbox" id="pref-notify" /><span>Notifications<small>New messages while the app is in the background. Muted chats stay quiet.</small></span></label>
-            <label class="pref pref-select"><span>Theme</span><select id="pref-theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+            <label class="pref pref-select"><span>Theme</span><select id="pref-theme"><option value="light">Light (default)</option><option value="dark">Dark</option><option value="system">Match this device</option></select></label>
           </div>
           <ul class="settings-list">
             <li><button type="button" data-go="security" data-focus="sec-card"><span>Privacy and security</span><small>Passphrase, app lock, safety numbers</small></button></li>
@@ -517,6 +522,22 @@
   </dialog>
 
   <div id="viewer" class="viewer hidden" role="dialog" aria-label="Photo"><img id="viewer-img" alt="Photo" /></div>
+
+  <dialog id="new-sheet" class="sheet" aria-label="Start something new">
+    <div class="sheet-grab" aria-hidden="true"></div>
+    <button type="button" class="sheet-item" data-new="text"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg></span><span><strong>New message</strong><small>Text, photo, file or voice message</small></span></button>
+    <button type="button" class="sheet-item" data-new="voice"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a1 1 0 01-1 1A16 16 0 014 5a1 1 0 011-1z"/></svg></span><span><strong>Voice call</strong><small>End-to-end encrypted</small></span></button>
+    <button type="button" class="sheet-item" data-new="video"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12"/><path d="M16 10l5-3v10l-5-3"/></svg></span><span><strong>Video call</strong><small>End-to-end encrypted</small></span></button>
+    <button type="button" class="sheet-item" data-new="group"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 19c0-3 3-5 6-5s6 2 6 5M16 5a3 3 0 010 6M18 14c2 .6 3 2.4 3 5"/></svg></span><span><strong>New group</strong><small>Up to 64 people</small></span></button>
+    <button type="button" class="sheet-item" data-new="phone"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2" width="10" height="20"/><path d="M11 18h2"/></svg></span><span><strong>Call a phone number</strong><small>Your FABRIC number or a burner</small></span></button>
+    <button type="button" class="sheet-cancel" data-new="cancel">Cancel</button>
+  </dialog>
+
+  <dialog id="pick-dialog" class="fwd-dialog" aria-label="Choose a contact">
+    <h3 id="pick-title">Choose</h3>
+    <ul id="pick-list" class="fwd-list"></ul>
+    <button id="pick-cancel" class="ghost" type="button">Cancel</button>
+  </dialog>
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 

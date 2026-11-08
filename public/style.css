@@ -538,3 +538,41 @@ mark { background: #ffe58a; color: inherit; padding: 0 1px; }
 .msg-menu { box-shadow: 0 8px 24px var(--shadow); }
 :root[data-theme="dark"] .msg-from { filter: brightness(2.1) saturate(1.4); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .msg-from { filter: brightness(2.1) saturate(1.4); } }
+
+/* ---------- footer: bottom bar with New, composer (v0.18) ---------- */
+.tab-new { color: var(--text); }
+.tab-new .new-plus { width: 30px; height: 30px; display: grid; place-items: center; background: var(--ink); color: var(--on-ink); }
+.tab-new .new-plus svg { width: 20px; height: 20px; stroke-width: 2.2; }
+@media (max-width: 760px) {
+  .tabs { height: 64px; box-shadow: 0 -1px 0 var(--line); }
+  .tab-new { border-top-color: transparent !important; }
+  .tab-new .new-plus { width: 48px; height: 48px; margin-top: -22px; border: 4px solid var(--panel); box-shadow: 0 2px 8px var(--shadow); }
+  .tab-new .new-plus svg { width: 24px; height: 24px; }
+  #app.m-main .main { padding-bottom: 64px; }
+}
+
+.sheet { border: 1px solid var(--line-strong); border-radius: 0; padding: 8px 0 12px; width: min(420px, 100vw); background: var(--panel); color: var(--text); }
+.sheet::backdrop { background: rgba(0,0,0,.35); }
+@media (max-width: 760px) {
+  .sheet { margin: auto 0 0; max-width: 100vw; width: 100vw; border-width: 1px 0 0; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+}
+.sheet-grab { width: 36px; height: 4px; background: var(--line); margin: 4px auto 8px; }
+.sheet-item { display: flex; align-items: center; gap: 14px; width: 100%; padding: 12px 20px; border: 0; background: var(--panel); color: var(--text); text-align: left; cursor: pointer; font: inherit; }
+.sheet-item:hover, .sheet-item:focus-visible { background: var(--panel-2); outline: none; }
+.sheet-item > span:last-child { display: flex; flex-direction: column; }
+.sheet-item strong { font-size: 15px; font-weight: 600; }
+.sheet-item small { font-size: 12px; color: var(--muted); }
+.sheet-ico { width: 40px; height: 40px; flex: none; display: grid; place-items: center; border: 1px solid var(--line); }
+.sheet-ico svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.sheet-cancel { display: block; width: calc(100% - 40px); margin: 8px 20px 0; padding: 11px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font: inherit; cursor: pointer; }
+
+/* composer: [attach] [message] [language] [mic | send] */
+.composer { align-items: flex-end; gap: 4px; padding: 8px 10px; background: var(--panel); }
+.composer textarea { min-height: 44px; }
+.composer .icon-btn { width: 40px; height: 44px; flex: none; }
+.tr-pick { position: relative; display: grid; place-items: center; cursor: pointer; color: var(--muted); }
+.tr-pick.on { color: var(--text); }
+.tr-pick select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; max-width: none !important; border: 0 !important; padding: 0 !important; }
+.tr-code { position: absolute; right: 1px; bottom: 4px; font-family: var(--mono); font-size: 9px; line-height: 1; padding: 1px 2px; background: var(--ink); color: var(--on-ink); pointer-events: none; }
+.composer:not(.has-text) .send-btn { display: none; }
+.composer.has-text #mic { display: none; }

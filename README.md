@@ -6,3 +6,5 @@ Private repository for the FabriC++ mobile app (Android and iPhone), following /
 - Messaging will use the Matrix Rust SDK (Apache-2.0) and a self-hosted Synapse (AGPL-3.0-or-later or Element commercial licence). Neither is in this repository yet.
 
 No licence file has been added. Infinitum Corporation has not chosen a licence for this repository.
+
+The native Android client is in `android/`. See `android/README.md` for the debug install and instrument commands.

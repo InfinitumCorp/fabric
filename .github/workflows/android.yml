@@ -1,0 +1,42 @@
+name: Android
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  debug-apks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 35
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.1"
+
+      - name: Lint, unit test, assemble debug APKs
+        working-directory: android
+        run: ./gradlew lint test assembleDebug assembleDebugAndroidTest --stacktrace
+
+      - name: SHA256 of debug APKs
+        run: sha256sum android/app/build/outputs/apk/debug/*.apk android/app/build/outputs/apk/androidTest/debug/*.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fabric-app-debug
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fabric-androidTest-debug
+          path: android/app/build/outputs/apk/androidTest/debug/*.apk
+          if-no-files-found: error

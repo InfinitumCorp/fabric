@@ -22,6 +22,7 @@ import { createPhone, toE164, formatNumber } from '/phone.js';
 import { mountDialpad, isTouch } from '/dialpad.js';
 import { seal, peekSealed, openSealed, isDeliveryKey } from '/shared/sealed.js';
 import { applyAction, actionPayload, quoteOf, extrasOf, reactionSummary, QUICK_REACTIONS } from '/shared/actions.js';
+import { installBots } from '/bots-ui.js';
 import {
   mediaOf, mediaLabel, fmtBytes, fmtDuration, MAX_MEDIA_BYTES, receiptPayload, applyReceipt, unreadFrom,
   freshTyping, TYPING_SEND_EVERY, TYPING_SHOW_FOR, groupOf, newGroup, mergeGroup, groupKey, isGroupKey, groupIdOf,
@@ -112,6 +113,7 @@ let sessions = null; // SessionManager: X3DH + Double Ratchet state per contact 
 let calls = null; // voice & video calls, signaled over the same sessions
 let phone = null; // FABRIC Phone: ordinary phone numbers through the relay's carrier
 let refSeq = 0;
+let bots = null; // bot buttons, keyboards, commands and deep links (public/bots-ui.js)
 let retry = 500;
 
 function initSessions() {
@@ -328,6 +330,7 @@ async function handle(msg) {
       registered = true;
       if (isDeliveryKey(msg.deliveryKey)) db.deliveryKey = msg.deliveryKey;
       setConn('connected', true);
+      bots?.onSignedIn();
       phone ??= createPhone({ request, inCall: () => Boolean(calls?.active), vault: { get: () => (db.burners ??= { records: [], byPeer: {} }), save: () => persist() } });
       phone.refresh();
       request({ type: 'number_status' }).then(onNumberStatus).catch(() => {});
@@ -822,11 +825,13 @@ async function processEnvelope(env) {
     ensureContacts(next.members).then(() => persist());
     return;
   }
+  if (payload.kind === 'bot_answer') { if (!fromSelf) bots?.onAnswer(env.from, payload); return; }
   if (payload.kind === 'action') {
     const peer = keyOf();
     if (!peer || !db.threads[peer]) return;
     const m = applyAction(db.threads[peer], fromSelf ? db.handle : env.from, payload, env.ts);
     if (!m) return;
+    if (payload.act === 'edit') bots?.applyEditMarkup(m, payload);
     persist();
     renderContacts();
     if (peer === active) renderMessages();
@@ -872,6 +877,8 @@ async function processEnvelope(env) {
   }
   const media = mediaOf(payload);
   if (media) entry.media = media;
+  const markup = !fromSelf && bots?.markupFor(env.from, payload);
+  if (markup) entry.markup = markup;
   if (!entry.text && !entry.media) return;
   const thread = (db.threads[peer] ??= []);
   if (thread.some((m) => m.id === env.id)) return;
@@ -1029,6 +1036,7 @@ function renderMessages() {
   if (!active) return;
   const ol = $('messages');
   ol.replaceChildren();
+  bots?.renderThread(active); // bot notice and Start, reply keyboard, / commands
   const q = threadQuery;
   let lastDay = '', hits = 0, lastHit = null;
   for (const m of db.threads[active] || []) {
@@ -1104,6 +1112,7 @@ function renderMessages() {
       }
       li.append(row);
     }
+    bots?.decorate(li, m, active);
     ol.append(li);
   }
   if (q) {
@@ -1422,6 +1431,7 @@ function renderThreadHead() {
     status.replaceChildren(document.createTextNode('🔒 End-to-end encrypted'), Object.assign(el('span'), { id: 'pq-badge' }));
     renderPqBadge();
   }
+  if (!g && bots?.headLabel(active)) status.textContent = `🔒 Encrypted to this ${bots.headLabel(active)}`;
   $('group-info-btn').classList.toggle('hidden', !g);
   $('show-safety').classList.toggle('hidden', Boolean(g));
   const p = prefsOf()[active] || {};
@@ -3234,5 +3244,9 @@ const growText = () => {
 $('text').addEventListener('input', growText);
 $('composer').addEventListener('submit', () => setTimeout(growText));
 
+bots = installBots({
+  $, el, toast, SAVED: typeof SAVED === 'undefined' ? null : SAVED, db: () => db, active: () => active, persist, isGroupKey, groupFor, addContact,
+  signedIn: () => registered, renderMessages, renderThreadHead, sendControl: (...a) => sendControl(...a), sendText: (...a) => sendText(...a),
+});
 startHandleDisplay();
 boot();

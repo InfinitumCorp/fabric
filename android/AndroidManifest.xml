@@ -30,6 +30,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- bot deep links: fabric://bot/<name>?start=<param> open that bot's chat in the app -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="fabric" android:host="bot" />
+            </intent-filter>
         </activity>
     </application>
 </manifest>

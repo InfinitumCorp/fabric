@@ -107,6 +107,7 @@ public class MainActivity extends Activity {
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
                 Uri u = req.getUrl();
                 if (sameOrigin(u)) return false;
+                if ("fabric".equals(u.getScheme())) { openBotLink(u); return true; }
                 // anything else (docs, checkout pages) opens in the browser, never inside the app
                 try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (Exception ignored) { }
                 return true;
@@ -135,7 +136,43 @@ public class MainActivity extends Activity {
         });
 
         if (state != null) web.restoreState(state);
-        else web.loadUrl(relay.toString());
+        else web.loadUrl(withBotLink(relay, getIntent().getData()));
+    }
+
+    /**
+     * Bot deep links: fabric://bot/<name>?start=<param>. Only a checked bot name and start parameter
+     * are passed on, as query parameters of the relay's own page, so a link can't repoint the app.
+     */
+    private static String[] botLink(Uri u) {
+        if (u == null || !"fabric".equals(u.getScheme()) || !"bot".equals(u.getHost())) return null;
+        java.util.List<String> seg = u.getPathSegments();
+        String name = seg.isEmpty() ? null : seg.get(0).toLowerCase(java.util.Locale.ROOT);
+        if (name == null || !name.matches("[a-z0-9_]{1,21}bot")) return null;
+        String start = u.getQueryParameter("start");
+        if (start != null && !start.matches("[A-Za-z0-9_-]{1,64}")) start = null;
+        return new String[] { name, start };
+    }
+
+    private static String withBotLink(Uri relay, Uri link) {
+        String[] b = botLink(link);
+        if (b == null) return relay.toString();
+        Uri.Builder u = relay.buildUpon().appendQueryParameter("bot", b[0]);
+        if (b[1] != null) u.appendQueryParameter("start", b[1]);
+        return u.build().toString();
+    }
+
+    /** The app is already open (singleTask): hand the link to the page. */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        openBotLink(intent.getData());
+    }
+
+    private void openBotLink(Uri link) {
+        String[] b = botLink(link);
+        if (b == null || web == null) return;
+        String href = "fabric://bot/" + b[0] + (b[1] != null ? "?start=" + b[1] : "");
+        web.evaluateJavascript("window.fabricOpenLink && window.fabricOpenLink(" + org.json.JSONObject.quote(href) + ")", null);
     }
 
     /**

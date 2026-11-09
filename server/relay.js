@@ -12,6 +12,8 @@
 // which also keeps the account's encrypted backup for restoring on a new device.
 // Scalvs: SCALVS.ai as the contact +scalvs.veil (server/scalvs.js), an ordinary device the relay
 // starts next to itself. The relay only reserves the handle for Scalvs's account key.
+// Bots: the Bot API (server/bots.js) at /bot<token>/<method>. Bot accounts are devices the relay
+// runs; new addresses ending in "bot" are reserved for them.
 
 import http from 'node:http';
 import https from 'node:https';
@@ -21,7 +23,7 @@ import { timingSafeEqual, createHash, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
-  generateIdentity, ownershipProof, timingSafeEqualB64, isValidHandle, isPublicJwk, publicOnly, b64,
+  generateIdentity, ownershipProof, timingSafeEqualB64, isValidHandle, normalizeHandle, isPublicJwk, publicOnly, b64,
 } from '../shared/crypto.js';
 import { verifySignedPreKey, verifyPqPreKey } from '../shared/ratchet.js';
 import { verifyDeviceList, findDevice, deviceAddr, parseAddr, DEVICE_ID_RE } from '../shared/devices.js';
@@ -40,6 +42,8 @@ import { turnFromEnv, turnCredentials } from './turn.js';
 import { createScalvs, scalvsFromEnv, isScalvsAccount, SCALVS_HANDLE } from './scalvs.js';
 import { aiFromEnv, createAi } from './scalvs-ai.js';
 import { localAiFromEnv, createLocalAi } from './scalvs-local.js';
+import { createBots, botsFromEnv } from './bots.js';
+import { isBotHandle } from '../shared/bots.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MAX_ENVELOPE_BYTES = 512 * 1024; // link payloads carry a history snapshot
@@ -130,6 +134,7 @@ export async function createRelay({
   sfuNodes = clusterFromEnv(),
   models = modelsFromEnv(process.env, ROOT),
   scalvs = null, // { stateFile, ai }: run Scalvs next to this relay (see scalvsFromEnv)
+  bots = null,   // { stateDir, allowLocalWebhooks }: the Bot API and +forgebot (see botsFromEnv)
 } = {}) {
   const store = openStore(dataFile, { importJson: dataFile ? legacyJson : null });
   const relayIdentity = await generateIdentity(); // per-process; used only for ownership proofs
@@ -138,6 +143,10 @@ export async function createRelay({
   const scalvsAi = !scalvs?.ai ? null : typeof scalvs.ai.ask === 'function' ? scalvs.ai
     : scalvs.ai.local ? createLocalAi({ ...scalvs.ai, log }) : createAi({ ...scalvs.ai, log }); // open model, or Claude
   const bot = scalvs ? await createScalvs({ stateFile: scalvs.stateFile ?? null, ai: scalvsAi, log }) : null;
+  const botHub = bots ? await createBots({ ...bots, isTaken: (h) => Boolean(store.getList(h)), log }) : null;
+  // the hub's own bot sockets (loopback, with its secret) are not counted against per-IP limits
+  const fromHub = (req) => Boolean(botHub) && LOCAL.has(req.socket.remoteAddress) && !req.headers['x-forwarded-for']
+    && typeof req.headers['x-fabric-bot-hub'] === 'string' && sameSecret(req.headers['x-fabric-bot-hub'], botHub.hubSecret);
   const online = new Map(); // "handle#device" -> ws
   const mailboxes = new Map(); // id -> { ws, expires }
   const socketsPerIp = new Map();
@@ -309,6 +318,9 @@ export async function createRelay({
       res.end(JSON.stringify(obj));
     };
 
+    // Bot API: /bot<token>/<method>, limited per bot (server/bots.js), not per IP
+    if (botHub && url.pathname.startsWith('/bot') && await botHub.handleHttp(req, res, url)) return;
+
     if (url.pathname.startsWith('/api/')) {
       const wait = limits.httpIp.take(clientIp(req));
       if (wait) return json(429, { error: 'rate limited', retryAfter: wait }, { 'retry-after': String(wait) });
@@ -317,6 +329,14 @@ export async function createRelay({
       // TURN logins are only handed out over a signed-in socket ('ice'), never here
       if (url.pathname === '/api/models') return json(200, { available: Boolean(modelProxy) });
       if (url.pathname === '/api/ice') return json(200, { iceServers, sfu: Boolean(sfuSvc), turn: Boolean(turn) });
+      if (url.pathname === '/api/bots/info') {
+        const h = normalizeHandle(url.searchParams.get('handle') || '');
+        if (!isValidHandle(h)) return json(400, { error: 'bad handle' });
+        if (h === SCALVS_HANDLE && bot) {
+          return json(200, { bot: true, system: true, handle: h, name: 'Scalvs', about: 'SCALVS.ai runs tasks for you. Send help to see them.', privacy: true, commands: [{ command: 'help', description: 'What Scalvs can do' }, { command: 'ping', description: 'Check it is there' }] });
+        }
+        return json(200, botHub ? botHub.info(h) : { bot: false });
+      }
       if (url.pathname === '/api/scalvs') return json(200, { enabled: Boolean(bot), handle: bot ? bot.handle : null, ai: Boolean(scalvsAi), ...(scalvsAi?.model ? { model: scalvsAi.model } : {}) });
       if (url.pathname === '/api/cid') return json(200, { enabled: Boolean(cidSvc), required: Boolean(cidSvc && cid.required) });
       if (url.pathname === '/api/cid/backup') {
@@ -476,6 +496,7 @@ export async function createRelay({
     verifyClient: ({ req }, done) => {
       const ip = clientIp(req);
       if (!allowedOrigin(req)) return done(false, 403, 'origin not allowed');
+      if (fromHub(req)) return done(true);
       if ((socketsPerIp.get(ip) || 0) >= MAX_SOCKETS_PER_IP) return done(false, 429, 'too many connections');
       if (limits.connectIp.take(ip)) return done(false, 429, 'rate limited');
       done(true);
@@ -512,7 +533,7 @@ export async function createRelay({
   for (const t of timers) t.unref();
 
   wss.on('connection', (ws, req) => {
-    const ip = clientIp(req);
+    const ip = fromHub(req) ? `bot-hub:${randomId()}` : clientIp(req);
     socketsPerIp.set(ip, (socketsPerIp.get(ip) || 0) + 1);
     ws.alive = true;
     ws.on('pong', () => { ws.alive = true; });
@@ -653,6 +674,8 @@ export async function createRelay({
         }
         // +scalvs.veil belongs to Scalvs's account key, even while Scalvs is turned off
         if (handle === SCALVS_HANDLE && !isScalvsAccount(bot, payload.account)) return fail('handle reserved');
+        // new addresses ending in "bot" belong to bots made with +forgebot (accounts that already exist keep theirs)
+        if (!existing && isBotHandle(handle) && !botHub?.mayRegister(handle, payload.account)) return fail('handle reserved');
         const dev = findDevice(payload, deviceId);
         if (!dev) return fail('device not on the account');
         // with FABRIC_CID_REQUIRED=1 a new address needs a CID that has none yet (sybil resistance)
@@ -875,6 +898,7 @@ export async function createRelay({
   }
   // Scalvs signs in over loopback like any client (the relay's own certificate, so no CA check)
   const scalvsReady = bot ? bot.start(`${tls ? 'https' : 'http'}://127.0.0.1:${actualPort}`, tls ? { rejectUnauthorized: false } : {}) : null;
+  const botsReady = botHub ? botHub.start(`${tls ? 'https' : 'http'}://127.0.0.1:${actualPort}`, tls ? { rejectUnauthorized: false } : {}) : null;
   return {
     port: actualPort,
     url: `${tls ? 'https' : 'http'}://localhost:${actualPort}`,
@@ -883,11 +907,14 @@ export async function createRelay({
     settle,
     scalvs: bot,
     scalvsReady,
+    bots: botHub,
+    botsReady,
     expirePhone: () => phoneSvc?.expire(),
     verifyLedger: () => store.verifyLedger(),
     close: () => new Promise((r) => {
       for (const t of timers) clearInterval(t);
       bot?.stop();
+      botHub?.stop();
       sfuSvc?.close();
       for (const c of wss.clients) c.terminate();
       wss.close();
@@ -906,8 +933,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const scalvs = scalvsFromEnv(process.env, dataFile);
   // AI tasks: Claude with an Anthropic key, else an open model on this machine (FABRIC_SCALVS_LOCAL=0: none)
   const scalvsAi = scalvs && (aiFromEnv() || localAiFromEnv(process.env, ROOT));
-  const relay = await createRelay({ port, dataFile, scalvs: scalvs && { ...scalvs, ai: scalvsAi } });
+  const bots = botsFromEnv(process.env, dataFile);
+  const relay = await createRelay({ port, dataFile, scalvs: scalvs && { ...scalvs, ai: scalvsAi }, bots });
   console.log(`FABRIC relay listening on ${relay.url}`);
+  if (bots) console.log('[relay] Bot API on /bot<token>/<method>; text +forgebot.veil to make a bot');
   if (scalvs) console.log(`[relay] Scalvs runs tasks as +scalvs.veil (AI tasks: ${!scalvsAi ? 'off' : scalvsAi.local ? 'open model on this machine' : scalvsAi.model})`);
   if (backup) {
     await backup.start(relay.store);

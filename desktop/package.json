@@ -23,6 +23,7 @@
   },
   "build": {
     "appId": "com.infinitum.fabric",
+    "protocols": [{ "name": "FabriC++ bot link", "schemes": ["fabric"] }],
     "productName": "FabriC++",
     "copyright": "© The Infinitum Corporation",
     "directories": {

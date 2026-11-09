@@ -31,7 +31,9 @@ app.setAppUserModelId(DEV ? 'com.infinitum.fabric.dev' : 'com.infinitum.fabric')
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => showWindow()); // argv of the second launch is ignored on purpose
+  // a second launch only brings the window up; from its argv nothing is taken but a checked fabric://bot link
+  app.on('second-instance', (e, argv) => { showWindow(); openBotLink(argv.find(isBotLink)); });
+  app.on('open-url', (e, url) => { e.preventDefault(); showWindow(); openBotLink(url); }); // macOS
   app.whenReady().then(start);
 }
 
@@ -95,11 +97,12 @@ function start() {
   });
 
   const wc = win.webContents;
-  wc.setWindowOpenHandler(({ url }) => { openOutside(url); return { action: 'deny' }; });
-  wc.on('will-navigate', (e, url) => { if (!sameOrigin(url)) { e.preventDefault(); openOutside(url); } });
+  wc.setWindowOpenHandler(({ url }) => { if (isBotLink(url)) openBotLink(url); else openOutside(url); return { action: 'deny' }; });
+  wc.on('will-navigate', (e, url) => { if (!sameOrigin(url)) { e.preventDefault(); if (isBotLink(url)) openBotLink(url); else openOutside(url); } });
   wc.on('will-redirect', (e, url) => { if (!sameOrigin(url)) { e.preventDefault(); openOutside(url); } });
   wc.on('will-attach-webview', (e) => e.preventDefault());
   wc.on('did-finish-load', () => { if (sameOrigin(wc.getURL())) hideBoot(); });
+  wc.on('did-finish-load', () => { if (pendingLink && sameOrigin(wc.getURL())) { const l = pendingLink; pendingLink = null; openBotLink(l); } });
   wc.on('did-fail-load', (_e, code, _desc, url, isMain) => {
     if (isMain && code !== -3 /* ERR_ABORTED */) showBoot('offline');
   });
@@ -225,6 +228,22 @@ function pickSource() {
     picker.on('closed', () => finish(null));
     picker.loadFile(path.join(__dirname, 'ui', 'picker.html'));
   });
+}
+
+// ---------- bot deep links: fabric://bot/<name>?start=<param> ----------
+// Only a bot name and start parameter are taken from a link, and handed to the relay's own page; a link
+// can never point the window somewhere else. Release builds register as the handler for fabric://.
+const BOT_LINK_RE = /^fabric:\/\/bot\/([a-z0-9_]{1,21}bot)\/?(?:\?start=([A-Za-z0-9_-]{1,64}))?$/i;
+const isBotLink = (u) => typeof u === 'string' && BOT_LINK_RE.test(u);
+let pendingLink = process.argv.find(isBotLink) || null;
+if (!DEV) app.setAsDefaultProtocolClient('fabric');
+
+function openBotLink(u) {
+  const m = typeof u === 'string' && BOT_LINK_RE.exec(u);
+  if (!m) return;
+  const href = `fabric://bot/${m[1].toLowerCase()}${m[2] ? `?start=${m[2]}` : ''}`;
+  if (!win || win.webContents.isLoading() || !sameOrigin(win.webContents.getURL())) { pendingLink = href; return; }
+  win.webContents.executeJavaScript(`window.fabricOpenLink && window.fabricOpenLink(${JSON.stringify(href)})`).catch(() => {});
 }
 
 function showWindow() {

@@ -266,6 +266,68 @@ Built-in tasks never leave the relay host. Scalvs keeps the last few turns of a 
 
 Each account gets 20 tasks per 10 minutes. `GET /api/scalvs` says whether Scalvs and AI tasks are on.
 
+## Bots and the Bot API
+
+Anyone can make a bot. Text **+forgebot.veil** in FabriC++ (or Settings → Bots): send `/newbot`, a name and an
+address ending in `bot` (like `+weatherbot`), and Forge replies with the bot's token. `/mybots` has buttons to
+replace the token, set commands, the description and privacy mode, or delete the bot.
+
+```bash
+FABRIC_BOT_TOKEN=<token> FABRIC_RELAY=http://localhost:8787 node tools/echo-bot.js
+```
+
+`tools/echo-bot.js` is a complete sample (no dependencies): commands, a counter with inline buttons and
+callbacks, a reply keyboard, deep-link start parameters, and echoing photos and files.
+
+**How a bot works, and who can read it.** A bot is a real FabriC++ account whose device runs on the relay
+(`server/bot-device.js`, one per bot). Messages to a bot are end-to-end encrypted to that device, decrypted
+on the relay and handed to the developer's program; replies are encrypted there to each recipient's devices.
+So the relay host and the bot's developer can read what people send a bot. The app says so in every bot
+chat and in the chat header, and in groups it names the bots that are members. Bot keys and settings are in
+`data/bots/` (secret, like `data/fabric.db`); updates are kept in memory only, until confirmed or for 24 hours.
+
+### Calling the API
+
+`POST /bot<token>/<method>` on the relay, with JSON, a form, or query parameters. Every reply is
+`{ "ok": true, "result": … }` or `{ "ok": false, "error_code": 400, "description": "…" }` (429 adds
+`parameters.retry_after`).
+
+- **Chats:** `chat_id` is a handle (`@amy.veil` or `+amy.veil`) for a private chat, or `#<groupId>` for a
+  group the bot is in. Message ids are strings.
+- **Updates:** `getUpdates` (`offset`, `limit` ≤ 100, `timeout` ≤ 50 s long polling, `allowed_updates`), or
+  `setWebhook` (`url`, `secret_token` sent as `x-fabric-bot-api-secret-token`, `drop_pending_updates`,
+  `allowed_updates`), `deleteWebhook`, `getWebhookInfo`. With a webhook set, `getUpdates` returns 409.
+  Webhooks are retried with backoff until they answer 2xx.
+- **Update kinds:** `message` (`message_id`, `date`, `from`, `chat`, `text`, `entities` with `bot_command`,
+  `start_param` for `/start <param>`, `reply_to_message`, `media` = `{ type, mime, name, size, data (base64) }`),
+  `callback_query` (`id`, `from`, `message: { message_id, chat }`, `data`), `my_chat_member` (added to a group).
+- **Sending:** `sendMessage` (`text` ≤ 4000, `reply_to_message_id`, `reply_markup`), `sendPhoto` /
+  `sendDocument` / `sendAudio` / `sendVoice` (base64 in `photo` / `document` / `audio`, with `mime_type`,
+  `file_name`, `caption`; up to 140 KB, since attachments ride inside the encrypted message),
+  `editMessageText`, `editMessageReplyMarkup`, `deleteMessage`, `sendChatAction` (typing), `leaveChat`.
+- **Buttons:** `reply_markup` is `{ "inline_keyboard": [[{ "text", "callback_data" | "url" }]] }` (up to 8 rows
+  of 8, `callback_data` ≤ 64 bytes, http(s) links only, which the app confirms before opening),
+  `{ "keyboard": [["Yes", "No"]], "resize_keyboard", "one_time_keyboard", "input_field_placeholder" }`, or
+  `{ "remove_keyboard": true }`. Answer a press with `answerCallbackQuery` (`callback_query_id`, `text`,
+  `show_alert`) within 10 minutes.
+- **Profile:** `getMe`, `setMyCommands` / `getMyCommands` / `deleteMyCommands` (the app's `/` menu),
+  `setMyDescription`, `setMyName`, `getChat`.
+
+**Deep links:** `fabric://bot/<name>?start=<param>` (the Android and desktop apps register `fabric://`), or
+`https://<relay>/?bot=<name>&start=<param>` in a browser, opens the bot's chat with a Start button that sends
+`/start <param>`.
+
+**Groups:** add a bot like any member. In privacy mode (the default) it only receives commands, messages that
+mention it (`+namebot`) and replies to its messages; turn privacy off in Forge to receive everything.
+
+**Limits (sandbox):** a bot can only write to people who wrote to it first and to groups it is in; it can't
+look anyone up. 30 messages/s per bot, a burst of 5 then 1/s per private chat, 20/min per group, 60 API calls
+per burst (30/s), one long poll at a time, webhooks over https to public addresses only (re-checked on every
+delivery, no redirects), 20 bots per person. New addresses ending in `bot` can only be registered by bots made
+with Forge (accounts that already exist keep theirs). Deleted bots' addresses are retired. Turn the platform
+off with `FABRIC_BOTS=0`; `FABRIC_BOTS_DIR` moves its state; `FABRIC_BOTS_LOCAL_WEBHOOKS=1` allows
+`http://localhost` webhooks for development.
+
 ## On-device AI beyond Chrome
 
 Browsers without a built-in model (Firefox, Safari, mobile, older Chrome) run open models in a worker with

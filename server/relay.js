@@ -44,6 +44,10 @@ import { aiFromEnv, createAi } from './scalvs-ai.js';
 import { localAiFromEnv, createLocalAi } from './scalvs-local.js';
 import { createBots, botsFromEnv } from './bots.js';
 import { isBotHandle } from '../shared/bots.js';
+import { createPlus, paymentsFromEnv } from './plus.js';
+import { createSpaces } from './spaces.js';
+import { createAds } from './ads.js';
+import { MAX_UPLOAD_BYTES, TIERS } from '../shared/tiers.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MAX_ENVELOPE_BYTES = 512 * 1024; // link payloads carry a history snapshot
@@ -69,6 +73,7 @@ const VENDOR_AI = {
   ...Object.fromEntries(['', '.asyncify', '.jsep'].flatMap((v) => ['.mjs', '.wasm'].map((ext) => [
     `/vendor/ort/ort-wasm-simd-threaded${v}${ext}`, ['onnxruntime-web', 'dist', `ort-wasm-simd-threaded${v}${ext}`]]))),
 };
+const TIERS_PUBLIC = () => Object.values(TIERS);
 const LOCAL = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
 const randomId = () => b64(globalThis.crypto.getRandomValues(new Uint8Array(18))).replace(/[+/=]/g, (c) => ({ '+': '-', '/': '_', '=': '' })[c]);
@@ -135,8 +140,23 @@ export async function createRelay({
   models = modelsFromEnv(process.env, ROOT),
   scalvs = null, // { stateFile, ai }: run Scalvs next to this relay (see scalvsFromEnv)
   bots = null,   // { stateDir, allowLocalWebhooks }: the Bot API and +forgebot (see botsFromEnv)
+  payments = paymentsFromEnv(process.env, log), // FabriC++ Plus checkout: off, test (Stripe test mode) or stub
+  clock = () => Date.now(), // tests: plans, spaces and ads read the time from here
 } = {}) {
   const store = openStore(dataFile, { importJson: dataFile ? legacyJson : null });
+  // plans, large groups and channels, sponsored posts (server/plus.js, spaces.js, ads.js)
+  const plus = createPlus({ store, payments, log, now: clock, onChange: (h) => { for (const w of socketsOf(h)) send(w, plus.status(h)); } });
+  const entitlements = (h) => plus.entitlements(h);
+  /** Send to every online device of these accounts; `msg` may be a function of the handle. */
+  const push = (handles, msg) => {
+    const want = new Set(handles);
+    for (const [addr, w] of online) {
+      const h = parseAddr(addr).handle;
+      if (want.has(h)) send(w, typeof msg === 'function' ? msg(h) : msg);
+    }
+  };
+  const spaces = createSpaces({ store, entitlements, log, now: clock, push, secret: store.secret('spaces') });
+  const ads = createAds({ store, entitlements, spaces, secret: store.secret('ads'), now: clock, log });
   const relayIdentity = await generateIdentity(); // per-process; used only for ownership proofs
   // Scalvs's keys are loaded before the relay listens, so its handle is reserved from the start.
   // `ai` is either a config from aiFromEnv or (tests) anything with ask(handle, text).
@@ -242,6 +262,13 @@ export async function createRelay({
     }
   }
 
+  /** An error when a new list adds devices beyond the plan (lists already over it may shrink). */
+  function tooManyDevices(handle, cur, next) {
+    const max = entitlements(handle).devices;
+    const n = next.devices.length;
+    return n > max && n > cur.payload.devices.length ? `Your plan allows ${max} devices. Remove one first, or upgrade to FabriC++ Plus.` : null;
+  }
+
   // ---------- sealed sender ----------
   /** The account's delivery key, made on first use. Its own devices get it when they register. */
   function deliveryKeyOf(handle) {
@@ -301,12 +328,16 @@ export async function createRelay({
     return LOCAL.has(req.socket.remoteAddress) && !req.headers['x-forwarded-for'];
   }
 
-  async function readJson(req, max = 10_000) {
+  async function readRaw(req, max = 10_000) {
     let body = '';
     for await (const chunk of req) {
       body += chunk;
       if (body.length > max) throw Object.assign(new Error('body too large'), { status: 413 });
     }
+    return body;
+  }
+  async function readJson(req, max = 10_000) {
+    const body = await readRaw(req, max);
     try { return JSON.parse(body || '{}'); } catch { throw Object.assign(new Error('bad json'), { status: 400 }); }
   }
 
@@ -339,6 +370,42 @@ export async function createRelay({
       }
       if (url.pathname === '/api/scalvs') return json(200, { enabled: Boolean(bot), handle: bot ? bot.handle : null, ai: Boolean(scalvsAi), ...(scalvsAi?.model ? { model: scalvsAi.model } : {}) });
       if (url.pathname === '/api/cid') return json(200, { enabled: Boolean(cidSvc), required: Boolean(cidSvc && cid.required) });
+      // ----- plans -----
+      if (url.pathname === '/api/plans') return json(200, { tiers: TIERS_PUBLIC(), payments: payments.mode, checkout: payments.mode === 'stub' || Boolean(payments.checkoutUrl) });
+      if (url.pathname === '/api/plus/stripe' && req.method === 'POST') {
+        const [code, body] = plus.stripeWebhook(await readRaw(req, 64_000), req.headers['stripe-signature']);
+        return json(code, body);
+      }
+      if (url.pathname === '/api/plus/grants') {
+        // operator: give or end a plan (payment taken outside the relay)
+        if (!isOperator(req)) return json(403, { error: 'operator only' });
+        if (req.method === 'POST') {
+          const { handle, tier = 'plus', days } = await readJson(req);
+          const d = Number(days);
+          if (!(d >= 0 && d <= 3660)) return json(400, { error: 'days: 0 to 3660 (0 ends the plan)' });
+          if (d === 0) { plus.revoke(handle); return json(200, plus.entitlements(handle)); }
+          try { return json(200, plus.grant(handle, tier, clock() + d * 86400_000, { source: 'operator', replace: true })); } catch (e) { return json(e.status || 500, { error: e.message }); }
+        }
+        return json(200, { subscriptions: plus.list() });
+      }
+      // ----- sponsored posts: operator campaign management (public/ads-admin.html) -----
+      const camp = /^\/api\/ads\/campaigns(?:\/([A-Za-z0-9_-]{1,32}))?$/.exec(url.pathname);
+      if (camp) {
+        if (!isOperator(req)) return json(403, { error: 'operator only' });
+        try {
+          if (!camp[1] && req.method === 'POST') return json(201, ads.create(await readJson(req)));
+          if (!camp[1]) return json(200, { campaigns: ads.list() });
+          if (req.method === 'PATCH' || req.method === 'POST') return json(200, ads.update(camp[1], await readJson(req)));
+          const c = ads.get(camp[1]);
+          return c ? json(200, c) : json(404, { error: 'unknown campaign' });
+        } catch (e) { if (!e.status) throw e; return json(e.status, { error: e.message }); }
+      }
+      // ----- public channels: readable by anyone, which is why they are not end-to-end encrypted -----
+      const chan = /^\/api\/channels\/([^/]{1,40})$/.exec(url.pathname);
+      if (chan) {
+        const p = spaces.publicPreview(decodeURIComponent(chan[1]));
+        return p ? json(200, p) : json(404, { error: 'no public channel at that address' });
+      }
       if (url.pathname === '/api/cid/backup') {
         if (!cidSvc) return json(404, { error: 'Cumulus://ID is not set up on this relay' });
         if (req.method === 'PUT') {
@@ -492,7 +559,7 @@ export async function createRelay({
   };
 
   const wss = new WebSocketServer({
-    server, path: '/ws', maxPayload: MAX_ENVELOPE_BYTES,
+    server, path: '/ws', maxPayload: Math.ceil(MAX_UPLOAD_BYTES * 4 / 3) + 64 * 1024, // posts in spaces; anything else is held to MAX_ENVELOPE_BYTES below
     verifyClient: ({ req }, done) => {
       const ip = clientIp(req);
       if (!allowedOrigin(req)) return done(false, 403, 'origin not allowed');
@@ -678,6 +745,9 @@ export async function createRelay({
         if (!existing && isBotHandle(handle) && !botHub?.mayRegister(handle, payload.account)) return fail('handle reserved');
         const dev = findDevice(payload, deviceId);
         if (!dev) return fail('device not on the account');
+        if (!existing && spaces.handleTaken(handle)) return fail('handle taken'); // a public channel's address
+        const over = existing && payload.version > existing.payload.version && tooManyDevices(handle, existing, payload);
+        if (over) return fail(over);
         // with FABRIC_CID_REQUIRED=1 a new address needs a CID that has none yet (sybil resistance)
         const needsCid = !existing && cidSvc && cid.required;
         if (needsCid && (!cidProof || store.cidHandle(cidProof.key))) return fail('Sign in with Cumulus://ID first.');
@@ -693,6 +763,7 @@ export async function createRelay({
         online.set(me.addr, ws);
         send(ws, { type: 'registered', handle, deviceId, list: store.getList(handle), deliveryKey: deliveryKeyOf(handle) });
         send(ws, accountFor(handle));
+        send(ws, plus.status(handle));
         send(ws, { type: 'prekey_count', count: store.opkCount(me.addr), hasSpk: Boolean(store.getSpk(me.addr)) });
         if (cidSvc) send(ws, cidStatus(handle));
         deliverQueued();
@@ -783,7 +854,9 @@ export async function createRelay({
           if (limited(limits.misc, me.addr)) return;
           const cur = store.getList(me.handle);
           try {
-            await verifyDeviceList(msg.list, { handle: me.handle, account: cur.payload.account, minVersion: cur.payload.version + 1 });
+            const next = await verifyDeviceList(msg.list, { handle: me.handle, account: cur.payload.account, minVersion: cur.payload.version + 1 });
+            const over = tooManyDevices(me.handle, cur, next);
+            if (over) return fail(over);
           } catch (e) { return fail(e.message); }
           applyList(me.handle, msg.list);
           for (const w of socketsOf(me.handle)) send(w, { type: 'devices', list: msg.list });
@@ -835,7 +908,41 @@ export async function createRelay({
           const { allocations, ...agg } = aggregate(revenue);
           return send(ws, { type: 'preview', ref: msg.ref, ...agg, mineCents: allocations[me.handle] || 0 });
         }
+        case 'plus_status':
+          if (limited(limits.misc, me.addr)) return;
+          return send(ws, { ...plus.status(me.handle), ref: msg.ref });
+        case 'plus_checkout': {
+          if (limited(limits.misc, me.addr)) return;
+          const c = plus.checkoutFor(me.handle);
+          if (!c) return fail('Checkout is not set up on this relay.');
+          if (c.stub) return send(ws, { type: 'plus_checkout', ref: msg.ref, stub: true, plan: plus.stubActivate(me.handle) });
+          return send(ws, { type: 'plus_checkout', ref: msg.ref, ...c });
+        }
+        case 'plus_badge':
+          if (limited(limits.misc, me.addr)) return;
+          plus.setBadge(me.handle, Boolean(msg.show));
+          return send(ws, { ...plus.status(me.handle), ref: msg.ref });
+        case 'badges': {
+          if (limited(limits.lookup, me.addr)) return;
+          const hs = Array.isArray(msg.handles) ? msg.handles.slice(0, 200).map(String) : [];
+          return send(ws, { type: 'badges', ref: msg.ref, plus: plus.badges(hs) });
+        }
+        case 'ads_fetch':
+        case 'ads_click': {
+          if (limited(limits.ads, me.addr)) return;
+          try {
+            const r = msg.type === 'ads_fetch' ? ads.serve(me.handle, { placement: msg.placement, sid: msg.sid }) : ads.click(me.handle, msg.id);
+            return send(ws, { type: msg.type, ref: msg.ref, ...r });
+          } catch (e) { if (!e.status) throw e; return fail(e.message); }
+        }
         default:
+          if (/^space_/.test(String(msg.type))) {
+            if (limited(msg.type === 'space_view' ? limits.misc : limits.spaces, me.addr)) return;
+            try { return send(ws, { ...spaces.ws(me.handle, msg), ref: msg.ref }); } catch (e) {
+              if (!e.status) throw e;
+              return fail(e.message, { status: e.status });
+            }
+          }
           if (/^sfu_/.test(String(msg.type))) {
             if (limited(limits.sfu, me.addr)) return;
             if (!sfuSvc) return fail('large calls are not available on this relay');
@@ -864,6 +971,8 @@ export async function createRelay({
       let msg;
       try { msg = JSON.parse(raw); } catch { return send(ws, { type: 'error', error: 'bad json' }); }
       if (!msg || typeof msg !== 'object') return send(ws, { type: 'error', error: 'bad json' });
+      // only a post to a large group or channel may be bigger than an envelope; the poster's plan limits it there
+      if (raw.length > MAX_ENVELOPE_BYTES && !(me && msg.type === 'space_post')) return ws.close(1009, 'message too big');
       const wait = limits.message.take(connKey);
       if (wait) {
         send(ws, { type: 'error', error: 'rate limited', retryAfter: wait, ref: msg.ref });
@@ -905,6 +1014,9 @@ export async function createRelay({
     store,
     limits,
     settle,
+    plus,
+    spaces,
+    ads,
     scalvs: bot,
     scalvsReady,
     bots: botHub,

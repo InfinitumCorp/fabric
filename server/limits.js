@@ -55,6 +55,8 @@ export function defaultLimits(opts = {}) {
     sealedTarget: b(300, 5),                // sealed envelopes per recipient device
     tally: b(10, per(10, 3600)),            // self-reported message counts for revenue share, per device
     cidIp: b(20, per(20, 600)),             // Cumulus://ID sign-ins started or finished, per IP
+    spaces: b(120, 2),                      // large group and channel actions (posts, reactions, joins), per device
+    ads: b(30, per(30, 60)),                // sponsored post requests and clicks, per device
   };
 }
 

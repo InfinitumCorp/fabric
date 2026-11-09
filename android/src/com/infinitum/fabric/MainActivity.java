@@ -90,7 +90,7 @@ public class MainActivity extends Activity {
         s.setAllowFileAccess(false);
         s.setAllowContentAccess(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        s.setUserAgentString(s.getUserAgentString() + " FabricAndroid/0.19.1");
+        s.setUserAgentString(s.getUserAgentString() + " FabricAndroid/0.20.0");
 
         web.setWebViewClient(new WebViewClient() {
             @Override

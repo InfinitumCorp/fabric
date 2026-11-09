@@ -9,15 +9,19 @@
 'use strict';
 
 const path = require('node:path');
+const fs = require('node:fs');
 const {
   app, BrowserWindow, WebContentsView, Menu, Tray, nativeImage, shell, session,
-  desktopCapturer, ipcMain, systemPreferences,
+  desktopCapturer, ipcMain, systemPreferences, globalShortcut,
 } = require('electron');
 const pkg = require('./package.json');
 
 const RELEASE_RELAY = 'https://relay.infinitumfabric.app/';
-const DEV_RELAY = 'http://localhost:8795/';
 const DEV = pkg.fabricDev === true || (!app.isPackaged && process.argv.includes('--dev'));
+// Running from source with --dev, FABRIC_DEV_PORT picks another port on localhost (for tests against a
+// throwaway relay). Only the port: never another host. Packaged builds, dev or release, ignore it.
+const devPort = !app.isPackaged && /^\d{4,5}$/.test(process.env.FABRIC_DEV_PORT || '') ? process.env.FABRIC_DEV_PORT : '8795';
+const DEV_RELAY = `http://localhost:${devPort}/`;
 const RELAY = new URL(DEV ? DEV_RELAY : RELEASE_RELAY);
 const TITLE = 'FabriC++™';
 const ACCENT = { r: 0x24, g: 0x54, b: 0xdd };
@@ -42,6 +46,74 @@ let boot = null;
 let tray = null;
 let quitting = false;
 let unread = 0;
+let ses = null;
+
+// ---------- the app's own settings (Settings › Desktop app in the page) ----------
+const HOTKEY = 'CommandOrControl+Alt+F';
+const DEFAULTS = {
+  openAtLogin: false, startMinimized: false, closeToTray: true, globalShortcut: true,
+  flashFrame: true, spellcheck: true, spellLanguages: [], dndUntil: 0,
+};
+const settingsFile = () => path.join(app.getPath('userData'), 'desktop-settings.json');
+let settings = { ...DEFAULTS };
+function loadSettings() {
+  try { settings = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) }; } catch { settings = { ...DEFAULTS }; }
+}
+function saveSettings() {
+  try { fs.writeFileSync(settingsFile(), JSON.stringify(settings, null, 2)); } catch { /* read-only profile: keep in memory */ }
+}
+/** Validates one setting from the page and applies it. Unknown keys and wrong types are refused. */
+function setSetting(key, value) {
+  if (!Object.hasOwn(DEFAULTS, key) || key === 'dndUntil') throw new Error('unknown setting');
+  if (key === 'spellLanguages') {
+    const avail = new Set(ses?.availableSpellCheckerLanguages || []);
+    if (!Array.isArray(value)) throw new Error('bad value');
+    value = [...new Set(value.filter((l) => typeof l === 'string' && (!avail.size || avail.has(l))))].slice(0, 5);
+  } else if (typeof value !== 'boolean') throw new Error('bad value');
+  settings[key] = value;
+  saveSettings();
+  applySettings();
+  return publicSettings();
+}
+// Dev builds never register a real login item (it would point at electron.exe); they only keep the choice.
+const loginItemsLive = () => app.isPackaged || Boolean(process.env.FABRIC_ALLOW_LOGIN_ITEM);
+function publicSettings() {
+  const { dndUntil, ...rest } = settings;
+  return { ...rest, openAtLogin: loginItemsLive() ? Boolean(app.getLoginItemSettings(loginArgs()).openAtLogin) : settings.openAtLogin };
+}
+const loginArgs = () => (process.platform === 'win32' ? { args: ['--from-login'] } : {});
+function applySettings() {
+  if (loginItemsLive()) {
+    app.setLoginItemSettings({ openAtLogin: settings.openAtLogin, openAsHidden: settings.startMinimized, ...loginArgs() });
+  }
+  globalShortcut.unregister(HOTKEY);
+  if (settings.globalShortcut) {
+    globalShortcut.register(HOTKEY, () => (win?.isVisible() && win.isFocused() ? win.hide() : showWindow()));
+  }
+  if (ses) {
+    ses.setSpellCheckerEnabled(settings.spellcheck);
+    if (settings.spellLanguages.length && process.platform !== 'darwin') {
+      try { ses.setSpellCheckerLanguages(settings.spellLanguages); } catch { /* language not available */ }
+    }
+  }
+  if (tray) tray.setContextMenu(trayMenu());
+}
+const startedFromLogin = () => process.argv.includes('--from-login') || app.getLoginItemSettings().wasOpenedAsHidden;
+
+/** Calls from the page: only the relay's page in the main window may use them. */
+function fromPage(e) {
+  return win && e.sender === win.webContents && sameOrigin(e.senderFrame?.url || '');
+}
+function setupBridge() {
+  ipcMain.handle('desk:get', (e) => (fromPage(e) ? publicSettings() : null));
+  ipcMain.handle('desk:set', (e, key, value) => {
+    if (!fromPage(e)) throw new Error('not allowed');
+    if (key === 'openAtLogin') { settings.openAtLogin = Boolean(value); saveSettings(); applySettings(); return publicSettings(); }
+    return setSetting(key, value);
+  });
+  ipcMain.handle('desk:spell-langs', (e) => (fromPage(e) ? [...(ses?.availableSpellCheckerLanguages || [])].sort() : []));
+}
+const command = (c) => { if (win && sameOrigin(win.webContents.getURL())) win.webContents.send('desk:command', c); };
 
 const sameOrigin = (u) => {
   try { return new URL(u).origin === RELAY.origin; } catch { return false; }
@@ -57,8 +129,11 @@ function openOutside(u) {
 
 function start() {
   Menu.setApplicationMenu(process.platform === 'darwin' ? macMenu() : null);
-  const ses = session.fromPartition(DEV ? 'persist:fabric-dev' : 'persist:fabric');
+  loadSettings();
+  ses = session.fromPartition(DEV ? 'persist:fabric-dev' : 'persist:fabric');
   lockSession(ses);
+  setupBridge();
+  const hidden = settings.startMinimized && startedFromLogin();
 
   win = new BrowserWindow({
     title: TITLE,
@@ -78,9 +153,13 @@ function start() {
       webSecurity: true,
       spellcheck: true,
       devTools: DEV,
+      preload: path.join(__dirname, 'ui', 'app-preload.js'),
+      additionalArguments: [`--fabric-version=${pkg.version}`],
     },
   });
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => { if (!hidden) win.show(); });
+  win.on('focus', () => win.flashFrame(false));
+  wireContextMenu(win.webContents);
 
   // The window title stays "FabriC++™"; the page's "(3) FabriC++ · +handle" only feeds the unread badge.
   win.on('page-title-updated', (e, title) => {
@@ -92,6 +171,7 @@ function start() {
   // Closing hides to the tray so messages and calls keep arriving; Quit is in the tray menu.
   win.on('close', (e) => {
     if (quitting || process.platform === 'darwin' && !tray) return;
+    if (!settings.closeToTray && process.platform !== 'darwin') { quitting = true; return; }
     e.preventDefault();
     win.hide();
   });
@@ -113,9 +193,27 @@ function start() {
   load();
 
   makeTray();
+  applySettings();
   setupScreenPicker(ses);
   app.on('activate', () => showWindow());
   app.on('before-quit', () => { quitting = true; });
+  app.on('will-quit', () => globalShortcut.unregisterAll());
+}
+
+/** Right-click in a text field: spelling suggestions, add to dictionary, cut/copy/paste. */
+function wireContextMenu(wc) {
+  wc.on('context-menu', (_e, p) => {
+    if (!p.isEditable && !p.selectionText) return;
+    const items = [];
+    if (p.misspelledWord) {
+      for (const s of p.dictionarySuggestions.slice(0, 5)) items.push({ label: s, click: () => wc.replaceMisspelling(s) });
+      if (!p.dictionarySuggestions.length) items.push({ label: 'No suggestions', enabled: false });
+      items.push({ label: 'Add to dictionary', click: () => wc.session.addWordToSpellCheckerDictionary(p.misspelledWord) }, { type: 'separator' });
+    }
+    if (p.isEditable) items.push({ role: 'cut', enabled: p.editFlags.canCut }, { role: 'copy', enabled: p.editFlags.canCopy }, { role: 'paste', enabled: p.editFlags.canPaste }, { type: 'separator' }, { role: 'selectAll' });
+    else items.push({ role: 'copy' });
+    Menu.buildFromTemplate(items).popup({ window: win });
+  });
 }
 
 function load() {
@@ -256,12 +354,33 @@ function showWindow() {
 function makeTray() {
   tray = new Tray(trayImage(0));
   tray.setToolTip(TITLE);
-  tray.setContextMenu(Menu.buildFromTemplate([
+  tray.setContextMenu(trayMenu());
+  tray.on('click', () => (win.isVisible() && win.isFocused() ? win.hide() : showWindow()));
+}
+
+function trayMenu() {
+  const dnd = settings.dndUntil > Date.now();
+  return Menu.buildFromTemplate([
     { label: 'Open FabriC++', click: showWindow },
+    { label: 'Saved messages', click: () => { showWindow(); command('saved'); } },
+    { type: 'separator' },
+    {
+      label: dnd ? 'Turn notifications back on' : 'Mute notifications for 1 hour',
+      click: () => {
+        settings.dndUntil = dnd ? 0 : Date.now() + 3600e3;
+        saveSettings();
+        command(dnd ? 'dnd-off' : 'dnd-1h');
+        tray.setContextMenu(trayMenu());
+      },
+    },
+    { label: 'Lock now', click: () => command('lock') },
+    {
+      label: 'Start at login', type: 'checkbox', checked: Boolean(publicSettings().openAtLogin),
+      click: (item) => { settings.openAtLogin = item.checked; saveSettings(); applySettings(); },
+    },
     { type: 'separator' },
     { label: 'Quit FabriC++', click: () => { quitting = true; app.quit(); } },
-  ]));
-  tray.on('click', () => (win.isVisible() && win.isFocused() ? win.hide() : showWindow()));
+  ]);
 }
 
 /** The F, with a square accent marker in the corner while there are unread messages. */
@@ -299,6 +418,7 @@ function overlayImage() {
 
 function setUnread(n) {
   if (n === unread) return;
+  if (n > unread && settings.flashFrame && !win.isFocused() && settings.dndUntil <= Date.now()) win.flashFrame(true);
   unread = n;
   const label = n ? `${n} unread` : '';
   win.setTitle(n ? `(${n}) ${TITLE}` : TITLE);

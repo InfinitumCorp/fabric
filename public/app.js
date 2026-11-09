@@ -22,12 +22,13 @@ import { createPhone, toE164, formatNumber } from '/phone.js';
 import { mountDialpad, isTouch } from '/dialpad.js';
 import { seal, peekSealed, openSealed, isDeliveryKey } from '/shared/sealed.js';
 import { applyAction, actionPayload, quoteOf, extrasOf, reactionSummary, QUICK_REACTIONS } from '/shared/actions.js';
-import { installBots } from '/bots-ui.js';
 import {
   mediaOf, mediaLabel, fmtBytes, fmtDuration, MAX_MEDIA_BYTES, receiptPayload, applyReceipt, unreadFrom,
   freshTyping, TYPING_SEND_EVERY, TYPING_SHOW_FOR, groupOf, newGroup, mergeGroup, groupKey, isGroupKey, groupIdOf,
   orderChats, MAX_PINNED,
 } from '/shared/chat.js';
+import { installDesk, SAVED, plainText } from '/desk.js';
+import { installBots } from '/bots-ui.js';
 
 // ---------- local vault (keys + history stay on this device, encrypted) ----------
 // ?profile=name lets several devices/accounts run side by side in one browser for testing.
@@ -113,6 +114,7 @@ let sessions = null; // SessionManager: X3DH + Double Ratchet state per contact 
 let calls = null; // voice & video calls, signaled over the same sessions
 let phone = null; // FABRIC Phone: ordinary phone numbers through the relay's carrier
 let refSeq = 0;
+let desk = null; // desktop-class features (public/desk.js), installed before boot
 let bots = null; // bot buttons, keyboards, commands and deep links (public/bots-ui.js)
 let retry = 500;
 
@@ -532,7 +534,7 @@ const groupsOf = () => (db.groups ??= {});
 const prefsOf = () => (db.chatPrefs ??= {});
 const userPrefs = () => (db.prefs ??= { receipts: true, typing: true, notify: false });
 const groupFor = (key) => (isGroupKey(key) ? groupsOf()[groupIdOf(key)] || null : null);
-const chatName = (key) => groupFor(key)?.name || key;
+const chatName = (key) => (key === SAVED ? 'Saved messages' : groupFor(key)?.name || key);
 const inGroup = (g) => Boolean(g && !g.left && g.members.includes(db.handle));
 /** Handles a message in this chat goes to (never me). */
 function recipientsOf(key) {
@@ -591,6 +593,7 @@ async function sendControl(key, payload, { outbox = true, self = true, only = nu
 async function sendText(text, tr = null, extra = null, to = active) {
   if (extra === null && to === active && composeCtx?.mode === 'reply') { extra = { reply: composeCtx.quote }; clearComposeCtx(); }
   extra ||= {};
+  if (to === SAVED) return saveNote(text, extra);
   const g = groupFor(to);
   if (isGroupKey(to) && !inGroup(g)) return;
   const media = extra.media ? mediaOf({ media: extra.media }) : null;
@@ -598,6 +601,7 @@ async function sendText(text, tr = null, extra = null, to = active) {
     ...(extra.reply ? { reply: extra.reply } : {}), ...(extra.fwd ? { fwd: true } : {}),
     ...(media ? { media: { type: media.type, mime: media.mime, name: media.name, data: media.data, ...(media.w ? { w: media.w, h: media.h } : {}), ...(media.dur ? { dur: media.dur } : {}) } } : {}),
     ...(g ? { group: { id: g.id, name: g.name, members: g.members } } : {}),
+    ...(extra.silent ? { silent: true } : {}),
   };
   if (g) await ensureContacts(g.members);
   else {
@@ -637,6 +641,16 @@ async function sendText(text, tr = null, extra = null, to = active) {
   for (const env of out) deliver(env);
 }
 
+/** Saved messages: notes to myself, kept on this device (and in backups and linked-device copies). */
+async function saveNote(text, extra) {
+  const media = extra.media ? mediaOf({ media: extra.media }) : null;
+  const msg = { id: newMessageId(), from: db.handle, text, ts: Date.now(), status: 'saved', ...(extra.reply ? { reply: extra.reply } : {}), ...(extra.fwd ? { forwarded: true } : {}), ...(media ? { media } : {}) };
+  (db.threads[SAVED] ??= []).push(msg);
+  if (active === SAVED) renderMessages();
+  renderContacts();
+  await persist();
+}
+
 /**
  * Edit, delete or react: applied here at once, then sent to every device of the contact and to my
  * own other devices. Copies wait in db.actionsOut until the relay takes them, like messages do.
@@ -646,6 +660,7 @@ async function sendAction(to, act, target, fields = {}) {
   if (!applyAction(db.threads[to] || [], db.handle, payload)) return;
   if (to === active) renderMessages();
   renderContacts();
+  if (to === SAVED) { await persist(); return; }
   await sendControl(to, payload);
 }
 
@@ -902,20 +917,25 @@ let showArchived = false;
 function chatKeys() {
   const keys = Object.keys(db.contacts).filter((h) => !db.contacts[h].viaGroup || db.threads[h]?.some((m) => m.from !== '@system'));
   for (const id of Object.keys(groupsOf())) keys.push(groupKey(id));
+  if (db.threads[SAVED]?.length || prefsOf()[SAVED]?.pinned) keys.push(SAVED);
   return keys;
 }
 const shortName = (h) => h.replace(/^@/, '').replace(/\.veil$/, '');
 function previewOf(key, last) {
+  const draft = desk?.draftOf(key);
+  if (draft) return 'Draft: ' + plainText(draft).replace(/\s+/g, ' ');
   if (!last) return isGroupKey(key) ? (db.threads[key]?.at(-1)?.text || 'No messages yet') : 'No messages yet';
   const who = last.from === db.handle ? 'You: ' : isGroupKey(key) ? `${shortName(last.from)}: ` : '';
   if (last.deleted) return who + 'Message deleted';
-  return who + mediaLabel(last.media, last.text);
+  return who + mediaLabel(last.media, plainText(last.text));
 }
 function renderContacts() {
   const ul = $('contacts');
   ul.replaceChildren();
   const q = searchQuery();
-  const all = chatKeys().filter((k) => !q || chatName(k).toLowerCase().includes(q) || k.toLowerCase().includes(q));
+  const everything = chatKeys();
+  desk?.renderFolders(everything.filter((k) => !prefsOf()[k]?.archived));
+  const all = everything.filter((k) => (!q || chatName(k).toLowerCase().includes(q) || k.toLowerCase().includes(q)) && (q || showArchived || !desk || desk.matches(k)));
   const archivedCount = orderChats(all, prefsOf(), lastTs, { archived: true }).length;
   const handles = orderChats(all, prefsOf(), lastTs, { archived: showArchived });
   if (showArchived || archivedCount) {
@@ -928,6 +948,7 @@ function renderContacts() {
   for (const h of handles) {
     const p = prefsOf()[h] || {};
     const li = el('li', h === active ? 'active' : '');
+    li.dataset.key = h;
     const left = el('div', 'contact-main');
     const top = el('div', 'contact-top');
     const name = el('div', 'contact-name', chatName(h));
@@ -939,7 +960,7 @@ function renderContacts() {
     top.append(name, el('span', 'contact-time', lastAny ? shortWhen(lastAny.ts) : ''));
     const bottom = el('div', 'contact-bottom');
     const typing = typingNow[h]?.until > Date.now();
-    bottom.append(el('div', 'preview' + (typing ? ' typing' : ''), typing ? (isGroupKey(h) ? `${shortName(typingNow[h].who)} is typing…` : 'typing…') : previewOf(h, last)));
+    bottom.append(el('div', 'preview' + (typing ? ' typing' : desk?.draftOf(h) ? ' draft' : ''), typing ? (isGroupKey(h) ? `${shortName(typingNow[h].who)} is typing…` : 'typing…') : previewOf(h, last)));
     if (db.unread[h]) bottom.append(el('span', 'badge' + (p.muted ? ' muted' : ''), String(db.unread[h])));
     if (!p.muted) totalUnread += db.unread[h] || 0;
     left.append(top, bottom);
@@ -1025,6 +1046,7 @@ function dayLabel(ts) {
 }
 const lastTs = (h) => db.threads[h]?.at(-1)?.ts || groupFor(h)?.created || db.contacts[h]?.addedAt || 0;
 function chatAvatar(key, cls = 'avatar') {
+  if (key === SAVED) { const a = el('div', cls + ' saved'); a.setAttribute('aria-hidden', 'true'); a.append(svgIcon('M6 3h12v18l-6-4-6 4z')); return a; }
   const g = groupFor(key);
   if (!g) return avatarEl(key, cls);
   const a = avatarEl('#' + g.name, cls + ' group');
@@ -1074,11 +1096,12 @@ function renderMessages() {
     const flipped = m.sentTr && showOriginal.has(m.id); // a message sent translated, shown as written
     const shown = flipped ? m.sentTr.text : translated ? m.tr.text : m.text;
     if (q && shown.toLowerCase().includes(q)) { li.append(...highlighted(shown, q, 'msg-text').childNodes); li.classList.add('hit'); hits++; lastHit = li; }
+    else if (desk) { const t = el('span', 'msg-text'); desk.formatInto(t, shown); li.append(t); }
     else li.append(document.createTextNode(shown));
     const time = new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const ed = m.edited ? 'edited · ' : '';
     const seen = mine && m.read && userPrefs().receipts !== false;
-    const meta = el('div', 'meta', mine ? `${ed}${time} · ${seen ? 'read' : m.status || ''}${m.sealed ? ' · sealed' : ''}` : ed + time);
+    const meta = el('div', 'meta', mine ? `${ed}${time} · ${seen ? 'read' : m.status || ''}${m.sealed ? ' · sealed' : ''}${m.silent ? ' · no sound' : ''}` : ed + time);
     if (mine) meta.prepend(el('span', 'ticks' + (seen ? ' read' : ''), seen || /^(delivered|queued)/.test(m.status || '') ? '✓✓ ' : /^sending|^offline/.test(m.status || '') ? '○ ' : /^failed/.test(m.status || '') ? '! ' : '✓ '));
     li.append(meta);
     if (m.sentTr) {
@@ -1356,7 +1379,7 @@ function renderKeyWarning() {
   const c = db.contacts[active];
   const box = $('key-warning');
   const g = groupFor(active);
-  $('call-buttons').classList.toggle('hidden', Boolean(g || c?.pendingAccount));
+  $('call-buttons').classList.toggle('hidden', Boolean(g || c?.pendingAccount || active === SAVED));
   if (g) { box.classList.add('hidden'); $('composer').classList.toggle('hidden', !inGroup(g)); return; }
   if (!c?.pendingAccount) { box.classList.add('hidden'); $('composer').classList.remove('hidden'); return; }
   box.replaceChildren(
@@ -1393,6 +1416,7 @@ function renderPqBadge() {
 
 async function openThread(h) {
   closeOutPreview(); // a translation preview belongs to the chat it was made in
+  if (active !== h) { desk?.saveDraft(active); if (composeCtx) clearComposeCtx(); desk?.restoreDraft(h); }
   active = h;
   delete db.unread[h];
   persist();
@@ -1408,7 +1432,9 @@ async function openThread(h) {
   if (composeCtx) clearComposeCtx();
   switchTab('chats');
   renderContacts(); renderMessages(); renderKeyWarning(); renderPqBadge();
+  desk?.renderThreadExtras();
   sendReceipts(h);
+  if (h === SAVED) { if (!matchMedia('(pointer: coarse)').matches) $('text').focus(); return; }
   if (isGroupKey(h)) { ensureContacts(groupFor(h)?.members || []); return; }
   if (db.contacts[h]?.viaGroup) { delete db.contacts[h].viaGroup; persist(); }
   if (registered) {
@@ -1425,7 +1451,9 @@ function renderThreadHead() {
   const g = groupFor(active);
   $('peer').textContent = chatName(active);
   const status = $('peer-status');
-  if (g) {
+  if (active === SAVED) {
+    status.textContent = 'Notes to yourself · kept on this device';
+  } else if (g) {
     status.textContent = inGroup(g) ? `${g.members.length} members · end-to-end encrypted` : 'You left this group';
   } else if (!status.querySelector('#pq-badge')) {
     status.replaceChildren(document.createTextNode('🔒 End-to-end encrypted'), Object.assign(el('span'), { id: 'pq-badge' }));
@@ -1435,7 +1463,8 @@ function renderThreadHead() {
   $('group-info-btn').classList.toggle('hidden', !g);
   $('show-safety').classList.toggle('hidden', Boolean(g));
   const p = prefsOf()[active] || {};
-  $('mute-chat').textContent = p.muted ? 'Unmute notifications' : 'Mute notifications';
+  $('mute-chat').textContent = p.muted ? `Unmute notifications (${desk?.muteLabel(active) || 'muted'})` : 'Mute notifications…';
+  $('mute-chat').classList.toggle('hidden', active === SAVED);
   $('archive-chat').textContent = p.archived ? 'Unarchive chat' : 'Archive chat';
   renderTyping();
 }
@@ -1572,6 +1601,8 @@ function setScreen(kind) {
 
 function closeThread() {
   if (rec) stopVoice(false);
+  desk?.saveDraft(active);
+  persist();
   active = null;
   closeThreadMenu();
   closeThreadSearch();
@@ -1652,6 +1683,7 @@ function renderSettings() {
   let theme = 'light';
   try { theme = localStorage.getItem(THEME_KEY) || 'light'; } catch { /* */ }
   $('pref-theme').value = theme;
+  desk?.renderSettings();
 }
 
 // ---------- message actions: reply, react, copy, forward, edit, delete ----------
@@ -1753,7 +1785,7 @@ function toast(text) {
 function openForward(m) {
   const list = $('fwd-list');
   list.replaceChildren();
-  const handles = chatKeys().filter((k) => (isGroupKey(k) ? inGroup(groupFor(k)) : db.contacts[k].list && !db.contacts[k].pendingAccount)).sort((a, b) => lastTs(b) - lastTs(a));
+  const handles = [SAVED, ...chatKeys().filter((k) => k !== SAVED && (isGroupKey(k) ? inGroup(groupFor(k)) : db.contacts[k].list && !db.contacts[k].pendingAccount)).sort((a, b) => lastTs(b) - lastTs(a))];
   if (!handles.length) list.append(el('li', 'contacts-empty', 'No contacts yet.'));
   for (const h of handles) {
     const b = el('button', 'fwd-to');
@@ -1787,7 +1819,7 @@ function mediaEl(m) {
     img.alt = 'Photo';
     img.src = `data:${md.mime};base64,${md.data}`; // mime checked against an image allowlist (shared/chat.js)
     if (md.w && md.h) { img.width = md.w; img.height = md.h; }
-    img.onclick = (e) => { e.stopPropagation(); openViewer(img.src); };
+    img.onclick = (e) => { e.stopPropagation(); if (desk) desk.openViewer(m); else openViewer(img.src); };
     return img;
   }
   if (md.type === 'audio') {
@@ -1841,7 +1873,7 @@ async function sendAttachment(file) {
   const extra = {};
   if (composeCtx?.mode === 'reply') { extra.reply = composeCtx.quote; clearComposeCtx(); }
   const caption = composeCtx?.mode === 'edit' ? '' : $('text').value.trim();
-  if (caption) { $('text').value = ''; growText(); }
+  if (caption) { $('text').value = ''; growText(); desk?.clearDraft(to); }
   try {
     let media;
     if (file.type.startsWith('image/') && file.type !== 'image/svg+xml') media = await imageMedia(file);
@@ -2044,8 +2076,11 @@ function renderGroupInfo() {
 function notifyIncoming(key, entry) {
   if (prefsOf()[key]?.muted || !userPrefs().notify || !document.hidden) return;
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const full = isGroupKey(key) ? `${shortName(entry.from)}: ${mediaLabel(entry.media, entry.text)}` : mediaLabel(entry.media, entry.text);
+  const shown = desk ? desk.notification(key, entry, full) : { title: chatName(key), body: full };
+  if (!shown) return;
   try {
-    const n = new Notification(chatName(key), { body: isGroupKey(key) ? `${shortName(entry.from)}: ${mediaLabel(entry.media, entry.text)}` : mediaLabel(entry.media, entry.text), tag: key });
+    const n = new Notification(shown.title, { body: shown.body, tag: key, silent: Boolean(desk) });
     n.onclick = () => { window.focus(); openThread(key); n.close(); };
   } catch { /* not allowed here (e.g. the Android app) */ }
 }
@@ -2247,6 +2282,7 @@ function showApp() {
   $('me').textContent = db.handle;
   $('me-device').textContent = `${db.deviceName}${db.primary ? ' · primary' : ' · linked'}`;
   document.title = `FabriC++ · ${db.handle}`;
+  desk?.onSignedIn();
   renderContacts();
   setScreen('list');
 }
@@ -3033,11 +3069,13 @@ $('sec-remove').onclick = async () => {
   renderSecurity();
 };
 
-$('sec-lock').onclick = async () => {
+async function lockApp() {
+  desk?.saveDraft(active);
   await persist().catch(() => {});
   vault.lock();
   location.reload(); // drops every key from memory
-};
+}
+$('sec-lock').onclick = lockApp;
 
 $('revoked-reset').onclick = async () => {
   await vault.destroy().catch(() => {});
@@ -3070,6 +3108,7 @@ $('composer').onsubmit = (e) => {
   const to = aiPrefs().out[active];
   if (to) return previewOut(active, t, to);
   $('text').value = '';
+  desk?.clearDraft(active);
   sendText(t);
 };
 $('translate-out').onchange = (e) => {
@@ -3125,11 +3164,9 @@ $('mic').onclick = startVoice;
 $('rec-cancel').onclick = () => stopVoice(false);
 $('rec-send').onclick = () => stopVoice(true);
 $('text').addEventListener('input', noteTyping);
-$('messages').addEventListener('dragover', (e) => { if (active) e.preventDefault(); });
-$('messages').addEventListener('drop', (e) => { e.preventDefault(); sendAttachment(e.dataTransfer?.files?.[0]); });
 $('text').addEventListener('paste', (e) => {
-  const file = [...(e.clipboardData?.files || [])][0];
-  if (file) { e.preventDefault(); sendAttachment(file); }
+  const files = [...(e.clipboardData?.files || [])];
+  if (files.length) { e.preventDefault(); desk ? desk.sendFiles(files) : sendAttachment(files[0]); }
 });
 $('viewer').onclick = closeViewer;
 $('new-group').onclick = openNewGroup;
@@ -3244,6 +3281,16 @@ const growText = () => {
 $('text').addEventListener('input', growText);
 $('composer').addEventListener('submit', () => setTimeout(growText));
 
+desk = installDesk({
+  $, el, toast, svgIcon, profile: PROFILE,
+  db: () => db, active: () => active, persist, prefsOf, userPrefs, setChatPref, chatKeys, chatName, chatAvatar, isGroupKey,
+  openThread, renderContacts, renderThreadHead, switchTab, openThreadSearch, jumpTo, blobUrl, growText, sendAttachment,
+  sendText: (...a) => sendText(...a), composeMode: () => composeCtx?.mode || null,
+  replyExtra: () => { if (composeCtx?.mode !== 'reply') return {}; const r = { reply: composeCtx.quote }; clearComposeCtx(); return r; },
+  startEdit: (m) => { setComposeCtx({ mode: 'edit', id: m.id, original: m.text }); $('text').value = m.text; growText(); $('text').focus(); },
+  menuChat: () => menuChat, closeChatMenu,
+  passphraseSet: async () => (await vault.meta())?.mode === 'passphrase', lock: lockApp,
+});
 bots = installBots({
   $, el, toast, SAVED: typeof SAVED === 'undefined' ? null : SAVED, db: () => db, active: () => active, persist, isGroupKey, groupFor, addContact,
   signedIn: () => registered, renderMessages, renderThreadHead, sendControl: (...a) => sendControl(...a), sendText: (...a) => sendText(...a),

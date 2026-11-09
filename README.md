@@ -368,6 +368,7 @@ WebAssembly can use several threads. Try it in Chrome with the built-in models h
 - **One origin.** Release builds load only `https://relay.infinitumfabric.app/`, and nothing can repoint them: command-line arguments, environment variables, a second launch and the page itself are all ignored. The relay serves the app's code, so this matters. Any link to another origin opens in the system browser. Pop-ups, `<webview>` and navigation away from the relay are blocked.
 - **Calls.** Camera, microphone, notifications and screen capture are granted only to the relay's own page. Every other permission, plus USB, HID and serial devices, is refused. macOS asks the OS once per device and shows its own screen picker (macOS 15+). Windows has no OS picker an app can call, so a small FabriC++ picker lists screens and windows, and nothing is shared until you pick one.
 - **Desktop behavior.** Single instance (launching it again focuses the window). Closing the window hides it to the tray so messages and calls keep arriving, and Quit is in the tray menu. The window title is always "FabriC++™". Unread chats show as a square accent marker on the tray icon and taskbar (Windows) or a dock badge (macOS). Message notifications go through the OS.
+- **App settings** (Settings › Desktop app, through a preload bridge only the relay's page in the main window may call): start at login and start in the tray, close to tray (on by default), a `Ctrl+Alt+F` / `⌘⌥F` hotkey that shows or hides the app from anywhere, taskbar flash for new messages, spellcheck with chosen languages and suggestions on right-click. The tray menu adds Saved messages, mute notifications for an hour, Lock now and Start at login. The bridge accepts only its known settings with the right types; none of them can change the relay.
 - **Branding.** The F from `public/brand/`, copied at build time by `desktop/tools/icons.js` (no separate artwork). While the relay's page loads, a boot screen shows the F and wordmark centered on white, matching the web `#boot` screen. If the relay can't be reached, it offers a retry.
 
 Build (Node 22+, no admin rights needed; Electron and the NSIS tooling are downloaded on first build):
@@ -378,8 +379,29 @@ npm install
 npm run dist        # release: dist/FabriC++-Setup-<version>.exe (per-user installer) and dist/FabriC++-<version>-portable.exe
 npm run dist:dev    # dev build that loads http://localhost:8795/ instead (output in dist-dev/)
 npm run dev         # run from source against http://localhost:8795/
-npm run smoke       # end-to-end check against a local relay on :8795 (sign-in, message, voice call, origin lock)
+npm run smoke       # end-to-end check against a local relay on :8795 (sign-in, message, voice call, origin lock,
+                    # settings bridge, Saved messages, drafts, folders, scheduled send, shortcuts sheet)
 ```
+
+`FABRIC_DEV_PORT=8796 npm run smoke` runs the same check against a throwaway relay on another localhost port. Only `npm run dev`/`smoke` from source read it, and only as a port on localhost; packaged builds, dev or release, ignore it.
+
+## Desktop-class features (all apps)
+
+FabriC++'s answer to what the big desktop messengers offer, checked feature by feature in [docs/desktop-parity.md](docs/desktop-parity.md). Built in `public/desk.js` (page) and `shared/desk.js` (tested logic), so the web client, the desktop app and the Android app all get them. None changes the encrypted protocol except one optional flag (`silent`) that older clients ignore.
+
+- **Chat folders.** All, Unread, Personal and Groups over the chat list, plus up to 10 of your own (by kind of chat and by chosen chats, optionally leaving muted ones out). `Ctrl+1…9` switches.
+- **Saved messages.** Notes to yourself (`Ctrl+0`, the bookmark in the sidebar, or forward anything into it). Kept on this device, in backups and in the history copied to a linked device.
+- **Drafts** stay with each chat when you switch or restart, shown as "Draft:" in the list.
+- **Send without sound and scheduled messages.** Hold or right-click Send. A silent message reaches the other side without an alert; a scheduled one is sent by this device when it's due (the desktop app keeps running in the tray).
+- **Formatting and links.** `**bold**`, `__italic__`, `~~strike~~`, `` `code` ``, ```` ```blocks``` ````, `||hidden until tapped||`, and clickable http(s) links that open outside the app. Built as DOM, never HTML.
+- **Media.** A photo viewer with previous/next, zoom, save and "Show in chat"; per chat, a Shared media and files sheet (photos, files, voice, links); several files at once by drag-and-drop anywhere on the chat or by paste.
+- **Navigation.** Jump to date (`Ctrl+J`), previous/next chat (`Alt+↑/↓`), edit your last message (`↑` in an empty box), and the full list on `Ctrl+/`.
+- **Export a chat** to a web page, plain text or JSON, decrypted on this device (photos and files optional).
+- **Notifications.** Mute a chat for 1 hour, 8 hours, a day, a week or always; a chime on or off; previews with the name and message, the name only, or nothing.
+- **Appearance.** Text size, chat background (plain, hairline grid, dot grid, diagonal rule), compact list, alongside the light/dark theme.
+- **Auto-lock** after 1–60 minutes away, and `Ctrl+L` to lock now (needs a passphrase).
+- **Several accounts** on one device, each with its own keys and encrypted storage (Settings › Accounts on this device).
+- **Picture-in-picture** during calls (Pop out).
 
 On a Mac, `npm run dist` produces a `.dmg` and `.zip`, with camera and microphone usage strings in Info.plist. Builds are unsigned for now: Windows SmartScreen and macOS Gatekeeper will warn until a code-signing certificate is configured (`CSC_LINK` / `CSC_KEY_PASSWORD` for electron-builder). Dev builds keep their own profile ("FabriC++ Dev"), so they never share a vault with the release app.
 

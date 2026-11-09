@@ -39,6 +39,7 @@ export function extrasOf(payload) {
   const reply = replyOf(payload);
   if (reply) out.reply = reply;
   if (payload?.fwd === true) out.forwarded = true;
+  if (payload?.silent === true) out.silent = true; // sent without sound: no alert on arrival
   return out;
 }
 

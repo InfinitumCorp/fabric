@@ -4,13 +4,17 @@
 // call that the other side answers, refuses to navigate to another origin, and saves a screenshot.
 //
 //   npm run smoke            (relay must be running on :8795; uses fake camera/microphone)
+//   FABRIC_DEV_PORT=8796 npm run smoke   (against a throwaway relay on another port)
+//
+// It also checks the desktop-class features: the shell's settings bridge, Saved messages,
+// formatting, chat folders, drafts, scheduling and the shortcuts sheet.
 'use strict';
 
 const path = require('node:path');
 const fs = require('node:fs');
 const { _electron: electron, chromium } = require('playwright-core');
 
-const RELAY = 'http://localhost:8795/';
+const RELAY = `http://localhost:${process.env.FABRIC_DEV_PORT || 8795}/`;
 const OUT = path.join(__dirname, '..', 'dist-dev');
 const fake = ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'];
 const tag = Math.random().toString(36).slice(2, 7);
@@ -71,6 +75,68 @@ async function openChat(page, handle) {
     await win.waitForSelector(`#messages :text("hi desktop ${tag}")`, { timeout: 30000 });
     step('reply received on the desktop');
 
+    // ---- desktop-class features ----
+    const bridge = await win.evaluate(async () => {
+      const d = window.FabricDesktop;
+      if (!d) return null;
+      const before = await d.getSettings();
+      const on = await d.setSetting('openAtLogin', true);
+      const off = await d.setSetting('openAtLogin', false);
+      let refused = false;
+      try { await d.setSetting('relay', 'https://evil.example/'); } catch { refused = true; }
+      let badType = false;
+      try { await d.setSetting('closeToTray', 'yes'); } catch { badType = true; }
+      const langs = await d.spellLanguages();
+      return { version: d.version, before, on: on.openAtLogin, off: off.openAtLogin, refused, badType, langs: langs.length };
+    });
+    if (!bridge) throw new Error('window.FabricDesktop is missing');
+    if (!bridge.on || bridge.off || !bridge.refused || !bridge.badType) throw new Error(`settings bridge: ${JSON.stringify(bridge)}`);
+    step(`settings bridge v${bridge.version}: start-at-login toggles, unknown and mistyped settings refused, ${bridge.langs} spelling languages`);
+    const login = await app.evaluate(({ app }) => app.getLoginItemSettings().openAtLogin);
+    if (login) throw new Error('a dev run registered a real login item');
+
+    await win.keyboard.press('Control+0');
+    await win.waitForFunction(() => document.getElementById('peer')?.textContent === 'Saved messages');
+    await win.fill('#text', '**note** to self https://example.com');
+    await win.press('#text', 'Enter');
+    await win.waitForSelector('#messages strong.fmt-b');
+    await win.waitForSelector('#messages a.msg-link[href^="https://example.com"]');
+    step('Saved messages (Ctrl+0) keeps a formatted note with a live link');
+
+    await openChat(win, B);
+    await win.fill('#text', 'unsent draft');
+    await win.keyboard.press('Control+0');
+    await win.waitForFunction(() => [...document.querySelectorAll('#contacts .preview.draft')].some((p) => p.textContent.includes('unsent draft')));
+    await openChat(win, B);
+    if ((await win.inputValue('#text')) !== 'unsent draft') throw new Error('draft not restored');
+    await win.fill('#text', '');
+    step('draft kept per chat and shown in the list');
+
+    await win.click('[data-folder=groups]');
+    if (await win.locator(`#contacts li[data-key="@${B}.veil"]`).count()) throw new Error('Groups folder shows a 1:1 chat');
+    await win.click('[data-folder=all]');
+    step('chat folders filter the list');
+
+    await win.fill('#text', `scheduled ${tag}`);
+    await win.click('#composer .send-btn', { button: 'right' });
+    await win.click('#send-menu >> text=Schedule message…');
+    await win.click('dialog[open] button:text-is("In 1 hour")');
+    await win.click('dialog[open] button:text-is("Schedule")');
+    await win.waitForSelector('#sched-bar:not(.hidden)');
+    await win.click('#sched-bar');
+    await win.click('dialog[open] button:text-is("Send now")');
+    await peer.waitForSelector(`#messages :text("scheduled ${tag}")`, { timeout: 30000 });
+    step('scheduled message sent and delivered');
+
+    await win.keyboard.press('Control+/');
+    await win.waitForSelector('dialog[open].keys-dialog');
+    await win.keyboard.press('Escape');
+    await win.click('[data-tab=settings] >> nth=0');
+    await win.waitForSelector('#desktop-card [data-setting=closeToTray]');
+    await win.click('#back, [data-back] >> nth=0').catch(() => {});
+    step('shortcuts sheet and Settings › Desktop app');
+
+    await openChat(win, B);
     await win.click('#call-voice');
     await peer.waitForSelector('#call-accept-voice', { state: 'visible', timeout: 30000 });
     await peer.click('#call-accept-voice');

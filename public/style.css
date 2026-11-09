@@ -612,3 +612,77 @@ input[type="checkbox"], input[type="radio"], input[type="range"], progress { acc
 .boot img { width: 96px; height: 96px; }
 .boot .brand { color: #111820; font-size: 34px; }
 body:has(.screen:not(.hidden)) .boot { display: none; }
+
+/* ---------- desktop-class features (public/desk.js) ---------- */
+.folders { display: flex; gap: 0; padding: 8px 18px 0; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--line); }
+.folders::-webkit-scrollbar { display: none; }
+.folder { flex: none; background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 6px 10px 8px; color: var(--muted); font-size: 13px; cursor: pointer; white-space: nowrap; }
+.folder.active { color: var(--text); border-bottom-color: var(--text); }
+.folder:hover { color: var(--text); }
+.folder-n { margin-left: 6px; font-family: var(--mono); font-size: 10px; background: var(--ink); color: var(--on-ink); padding: 1px 5px; }
+.folder-edit { margin-left: auto; font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.preview.draft { color: var(--err); }
+.avatar.saved { background: var(--accent); }
+.avatar.saved svg { width: 55%; height: 55%; fill: none; stroke: #fff; stroke-width: 1.8; }
+#open-saved svg { fill: none; }
+
+.desk-dialog { width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; }
+.desk-dialog .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
+.desk-dialog .field { display: block; margin: 8px 0; }
+.desk-dialog .field > span { display: block; font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+.desk-dialog .text-input { width: 100%; }
+.desk-dialog .row { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+.desk-dialog .eyebrow { margin: 14px 0 4px; color: var(--muted); }
+.choice-list { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.choice { text-align: left; background: none; border: 0; border-bottom: 1px solid var(--line); padding: 11px 4px; cursor: pointer; font-size: 14px; }
+.choice:hover, .choice:focus-visible { background: var(--panel-2); }
+.folder-row, .sched-row, .shared-row { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--line); }
+.folder-row .contact-name { flex: 1; }
+.sched-row .contact-main, .shared-row .contact-main { flex: 1; min-width: 0; }
+.shared-dialog { width: min(640px, calc(100vw - 32px)); }
+.shared-dialog .seg button { font-size: 12px; }
+.shared-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 2px; }
+.shared-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; cursor: zoom-in; background: var(--panel-2); display: block; }
+.shared-link { color: var(--accent); overflow-wrap: anywhere; }
+.shared-row audio { width: 100%; height: 34px; }
+.keys th { font-family: var(--mono); white-space: nowrap; }
+.lang-pick { max-height: 160px; overflow: auto; border: 1px solid var(--line); padding: 0 8px; margin: 4px 0 8px; }
+.lang-pick .pref { padding: 4px 0; }
+.desk-settings .chat-prefs { margin-top: 18px; }
+.accounts { margin: 6px 0 10px; }
+
+.sched-bar { display: block; width: 100%; text-align: left; background: var(--panel-2); border: 0; border-top: 1px solid var(--line); padding: 8px 24px; font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text); cursor: pointer; }
+.sched-bar:hover { color: var(--accent); }
+#send-menu { position: fixed; z-index: 70; }
+.thread { position: relative; }
+.drop-zone { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; background: color-mix(in srgb, var(--panel) 88%, transparent); border: 2px dashed var(--text); pointer-events: none; }
+.drop-zone div { font-family: var(--mono); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; }
+
+.msg-link { color: inherit; text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.msg:not(.mine) .msg-link { color: var(--accent); }
+.fmt-code, .fmt-pre { font-family: var(--mono); font-size: .9em; background: rgba(127,127,127,.16); padding: 0 3px; }
+.fmt-pre { display: block; padding: 6px 8px; margin: 4px 0; white-space: pre-wrap; }
+.spoiler { background: currentColor; cursor: pointer; transition: background .15s; }
+.spoiler.shown { background: rgba(127,127,127,.18); cursor: text; }
+
+.viewer-bar { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 8px; align-items: center; padding: 10px 16px; background: rgba(0,0,0,.6); color: #fff; flex-wrap: wrap; cursor: default; }
+.viewer-bar .ghost { background: transparent; color: #fff; border-color: rgba(255,255,255,.4); text-decoration: none; }
+.viewer-count { flex: 1; font-family: var(--mono); font-size: 11px; letter-spacing: .04em; min-width: 0; }
+.viewer-nav { position: fixed; top: 50%; transform: translateY(-50%); width: 48px; height: 72px; background: rgba(0,0,0,.45); color: #fff; border: 1px solid rgba(255,255,255,.3); font-size: 30px; cursor: pointer; }
+.viewer-nav.prev { left: 12px; } .viewer-nav.next { right: 12px; }
+.viewer-nav:disabled { opacity: .2; cursor: default; }
+.viewer img { cursor: zoom-in; }
+.viewer.zoomed { overflow: auto; place-items: start center; }
+.viewer.zoomed img { max-width: none; max-height: none; cursor: zoom-out; }
+
+/* appearance: text size, chat background, compact list */
+:root[data-text-size="s"] .msg { font-size: 13px; }
+:root[data-text-size="l"] .msg { font-size: 17px; }
+:root[data-text-size="xl"] .msg { font-size: 19px; }
+:root[data-text-size="l"] .contacts .preview, :root[data-text-size="xl"] .contacts .preview { font-size: 14px; }
+:root[data-chat-bg="grid"] .messages { background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: 32px 32px; }
+:root[data-chat-bg="dots"] .messages { background-image: radial-gradient(var(--line) 1.2px, transparent 1.4px); background-size: 18px 18px; }
+:root[data-chat-bg="rule"] .messages { background-image: repeating-linear-gradient(135deg, transparent 0 22px, var(--line) 22px 23px); }
+:root[data-compact] .contacts li { padding-top: 7px; padding-bottom: 7px; }
+:root[data-compact] .contacts .avatar { width: 34px; height: 34px; font-size: 14px; }
+@media (max-width: 760px) { .folders { padding-left: 16px; padding-right: 16px; } .sched-bar { padding-left: 16px; } }

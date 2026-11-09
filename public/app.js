@@ -1379,7 +1379,7 @@ $('translate-toggle').onclick = () => {
 function renderReplyOffer() {
   let box = $('tr-offer');
   const theirs = active && theirLanguage(db.threads[active], db.handle, ai.target);
-  const lang = active && offerReplyIn(aiPrefs(), active, theirs, { languages: TRANSLATION_LANGS });
+  const lang = active && !aiAsk && offerReplyIn(aiPrefs(), active, theirs, { languages: TRANSLATION_LANGS }); // one question at a time
   if (!lang) { box?.remove(); return; }
   if (!box) { box = el('div', 'tr-offer'); box.id = 'tr-offer'; $('out-preview').before(box); }
   if (box.dataset.key === `${active}|${lang}`) return;

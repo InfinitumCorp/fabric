@@ -46,6 +46,9 @@ export function createBotDevice({ state, save, onMessage, log = console.log, now
   const pending = new Map(); // ref -> { type, resolve, reject, timer }
   let work = Promise.resolve(); // envelopes are handled one at a time, in order
   const readyWaiters = [];
+  let keysUp = false; // the relay holds this device's signed prekey: others can start a session
+  // ready = signed in AND reachable; before the prekeys are up, a first message to the bot fails
+  const flushReady = () => { if (registered && keysUp) for (const w of readyWaiters.splice(0)) w(); };
 
   const sm = new SessionManager({
     handle: me.handle, deviceId: me.deviceId, identity: state.device.keys, store: state.sessions,
@@ -158,11 +161,12 @@ export function createBotDevice({ state, save, onMessage, log = console.log, now
       case 'registered':
         registered = true;
         deliveryKey = m.deliveryKey;
-        for (const w of readyWaiters.splice(0)) w();
+        flushReady();
         return;
       case 'prekey_count': {
         const up = await sm.maintainPreKeys(m.hasSpk ? m.count : 0, { forceSpk: !m.hasSpk });
-        if (up) wsSend({ type: 'upload_prekeys', ...up });
+        if (up) wsSend({ type: 'upload_prekeys', ...up }); // the relay answers with another prekey_count
+        else if (m.hasSpk) { keysUp = true; flushReady(); }
         return;
       }
       case 'delivery_key':

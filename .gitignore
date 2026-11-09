@@ -4,3 +4,13 @@ app/node_modules/
 .expo/
 server/data/
 server/pgdata/
+.gradle/
+**/build/
+local.properties
+*.iml
+.idea/
+captures/
+.cxx/
+*.apk
+*.aab
+.DS_Store

@@ -2,6 +2,7 @@
 // Not end-to-end encrypted (the phone network can't be); the UI says so next to every action.
 
 import { reconcile, lineFor } from '../shared/burner.js';
+import { mountDialpad } from './dialpad.js';
 
 const $ = (id) => document.getElementById(id);
 const E164 = /^\+[1-9]\d{6,14}$/;
@@ -116,6 +117,10 @@ export function createPhone({ request, inCall = () => false, vault = null }) {
     active = null;
     incoming = null;
     callInfo = null;
+    $('phone-call-pad').classList.add('hidden');
+    $('phone-keypad').setAttribute('aria-expanded', 'false');
+    $('phone-call-tones').textContent = '';
+    $('phone-call-tones').classList.add('hidden');
     renderCall();
     refreshLog();
   }
@@ -368,10 +373,21 @@ export function createPhone({ request, inCall = () => false, vault = null }) {
   $('phone-decline').onclick = () => { incoming?.reject(); done(); };
   $('phone-hangup').onclick = () => { active?.disconnect(); done(); };
   $('phone-mute').onclick = () => { if (active) { active.mute(!active.isMuted()); renderCall(); } };
-  $('phone-keypad').oninput = (e) => {
-    const d = e.data;
-    if (active && d && /^[0-9*#]$/.test(d)) active.sendDigits(d);
+  // touch-tones during a call: the on-screen pad sends each key as it's pressed
+  mountDialpad($('phone-call-pad'), {
+    onKey: (k) => {
+      if (!active || !/^[0-9*#]$/.test(k)) return;
+      active.sendDigits(k);
+      const t = $('phone-call-tones');
+      t.textContent = (t.textContent + k).slice(-24);
+      t.classList.remove('hidden');
+    },
+  });
+  $('phone-keypad').onclick = () => {
+    const open = $('phone-call-pad').classList.toggle('hidden') === false;
+    $('phone-keypad').setAttribute('aria-expanded', String(open));
   };
+  mountDialpad($('phone-pad'), { input: $('phone-to') });
   addEventListener('pagehide', () => {
     active?.disconnect();
     device?.destroy();

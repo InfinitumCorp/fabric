@@ -15,6 +15,11 @@ import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+import android.view.Gravity;
+import android.graphics.Typeface;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
@@ -38,6 +43,9 @@ import java.util.List;
  */
 public class MainActivity extends Activity {
     private static final String DEFAULT_RELAY = "http://localhost:8788/";
+    /** Release builds (FABRIC_RELEASE=1 bash android/build.sh) are locked to DEFAULT_RELAY: the relay
+     *  serves the app's own code, so no other app may repoint it with a launch extra. */
+    private static final boolean RELEASE = false;
     private static final int PERMS = 1;
     private static final int PICK_FILE = 2;
 
@@ -46,15 +54,20 @@ public class MainActivity extends Activity {
     private PermissionRequest pending;
     private ValueCallback<Uri[]> filePicked;
     private FrameLayout root;
+    private View boot;
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         SharedPreferences prefs = getSharedPreferences("fabric", MODE_PRIVATE);
-        String chosen = getIntent().getStringExtra("relay");
-        if (chosen != null && allowedRelay(Uri.parse(chosen))) prefs.edit().putString("relay", chosen).apply();
-        relay = Uri.parse(prefs.getString("relay", DEFAULT_RELAY));
-        if (!allowedRelay(relay)) relay = Uri.parse(DEFAULT_RELAY);
+        if (RELEASE) {
+            relay = Uri.parse(DEFAULT_RELAY);
+        } else {
+            String chosen = getIntent().getStringExtra("relay");
+            if (chosen != null && allowedRelay(Uri.parse(chosen))) prefs.edit().putString("relay", chosen).apply();
+            relay = Uri.parse(prefs.getString("relay", DEFAULT_RELAY));
+            if (!allowedRelay(relay)) relay = Uri.parse(DEFAULT_RELAY);
+        }
 
         // debuggable builds only (FABRIC_DEBUG=1 bash android/build.sh); release builds never expose the page
         if ((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) WebView.setWebContentsDebuggingEnabled(true);
@@ -63,6 +76,8 @@ public class MainActivity extends Activity {
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.WHITE);
         root.addView(web, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        boot = bootScreen();
+        root.addView(boot, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         setContentView(root);
         fitSystemBars(root);
         // the page tells the shell when it switches to dark, so the status and navigation bars match
@@ -75,9 +90,19 @@ public class MainActivity extends Activity {
         s.setAllowFileAccess(false);
         s.setAllowContentAccess(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        s.setUserAgentString(s.getUserAgentString() + " FabricAndroid/0.17.0");
+        s.setUserAgentString(s.getUserAgentString() + " FabricAndroid/0.19.1");
 
         web.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                // the page shows the same centered mark until it's ready, so the hand-off is seamless
+                if (boot != null) {
+                    View b = boot;
+                    boot = null;
+                    b.animate().alpha(0f).setDuration(180).withEndAction(() -> root.removeView(b)).start();
+                }
+            }
+
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
                 Uri u = req.getUrl();
@@ -165,10 +190,34 @@ public class MainActivity extends Activity {
         super.onActivityResult(code, result, data);
     }
 
+    /** Boot screen: the FabriC++ F and wordmark, centered on white, while the page loads. */
+    private View bootScreen() {
+        float dp = getResources().getDisplayMetrics().density;
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER);
+        box.setBackgroundColor(Color.WHITE);
+        box.setClickable(true);
+        ImageView mark = new ImageView(this);
+        mark.setImageResource(R.drawable.icon);
+        box.addView(mark, new LinearLayout.LayoutParams((int) (144 * dp), (int) (144 * dp)));
+        TextView word = new TextView(this);
+        word.setText("FabriC++™");
+        word.setTextColor(Color.rgb(0x11, 0x18, 0x20));
+        word.setTextSize(30);
+        word.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+        word.setLetterSpacing(-0.04f);
+        word.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = (int) (-20 * dp);
+        box.addView(word, lp);
+        return box;
+    }
+
     private static boolean allowedRelay(Uri u) {
         if (u == null || u.getHost() == null) return false;
         if ("https".equals(u.getScheme())) return true;
-        return "http".equals(u.getScheme()) && ("localhost".equals(u.getHost()) || "127.0.0.1".equals(u.getHost()));
+        return !RELEASE && "http".equals(u.getScheme()) && ("localhost".equals(u.getHost()) || "127.0.0.1".equals(u.getHost()));
     }
 
     private boolean sameOrigin(Uri u) {

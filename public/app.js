@@ -19,6 +19,7 @@ import { languageName } from '/shared/ai.js';
 import { TRANSLATION_LANGS } from '/shared/models.js';
 import { createCalls } from '/calls.js';
 import { createPhone, toE164, formatNumber } from '/phone.js';
+import { mountDialpad, isTouch } from '/dialpad.js';
 import { seal, peekSealed, openSealed, isDeliveryKey } from '/shared/sealed.js';
 import { applyAction, actionPayload, quoteOf, extrasOf, reactionSummary, QUICK_REACTIONS } from '/shared/actions.js';
 import {
@@ -1605,11 +1606,11 @@ function renderCallLog() {
     top.append(el('span', 'contact-name', h), el('span', 'contact-time', shortWhen(m.ts)));
     mid.append(top, el('div', 'preview', m.text));
     const voice = el('button', 'icon-btn');
-    voice.type = 'button'; voice.title = `Voice call ${h}`; voice.setAttribute('aria-label', voice.title);
+    voice.type = 'button'; voice.title = `FabVoice ${h}`; voice.setAttribute('aria-label', voice.title);
     voice.append(svgIcon('M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a1 1 0 01-1 1A16 16 0 014 5a1 1 0 011-1z'));
     voice.onclick = (e) => { e.stopPropagation(); calls?.start(h, false); };
     const video = el('button', 'icon-btn');
-    video.type = 'button'; video.title = `Video call ${h}`; video.setAttribute('aria-label', video.title);
+    video.type = 'button'; video.title = `FabVid ${h}`; video.setAttribute('aria-label', video.title);
     video.append(svgIcon('M3 6h13v12H3zM16 10l5-3v10l-5-3'));
     video.onclick = (e) => { e.stopPropagation(); calls?.start(h, true); };
     li.append(avatarEl(h), mid, voice, video);
@@ -2063,8 +2064,8 @@ function openPicker(title, onPick) {
 function startNew(kind) {
   $('new-sheet').close();
   if (kind === 'text') return $('new-chat').click();
-  if (kind === 'voice') return openPicker('Voice call', (h) => calls?.start(h, false));
-  if (kind === 'video') return openPicker('Video call', (h) => calls?.start(h, true));
+  if (kind === 'voice') return openPicker('FabVoice™ call', (h) => calls?.start(h, false));
+  if (kind === 'video') return openPicker('FabVid™ call', (h) => calls?.start(h, true));
   if (kind === 'group') return openNewGroup();
   if (kind === 'phone') return openNumberDialog();
   if (kind === 'calls' || kind === 'settings') {
@@ -2166,9 +2167,17 @@ $('number-unlink').onclick = async () => {
 function openNumberDialog() {
   $('num-input').value = '';
   $('num-result').replaceChildren();
+  $('num-dialog').classList.remove('has-result');
   $('num-dialog').showModal();
-  $('num-input').focus();
+  if (!isTouch()) $('num-input').focus(); // on a phone the dial pad is the keyboard
 }
+mountDialpad($('num-pad'), { input: $('num-input') });
+// typing again after a lookup brings the pad back
+$('num-input').addEventListener('input', () => {
+  if (!$('num-dialog').classList.contains('has-result')) return;
+  $('num-dialog').classList.remove('has-result');
+  $('num-result').replaceChildren();
+});
 $('num-close').onclick = () => $('num-dialog').close();
 $('num-form').onsubmit = async (e) => {
   e.preventDefault();
@@ -2177,6 +2186,7 @@ $('num-form').onsubmit = async (e) => {
   out.replaceChildren();
   if (!n) return out.append(el('p', 'error small', 'Enter a full number, like +1 555 123 4567.'));
   out.append(el('p', 'muted small', 'Looking it up…'));
+  $('num-dialog').classList.add('has-result');
   let h = null;
   try { h = await lookupNumber(n); } catch (err) { out.replaceChildren(el('p', 'error small', err.message)); return; }
   out.replaceChildren();
@@ -2185,9 +2195,9 @@ $('num-form').onsubmit = async (e) => {
     out.append(el('p', 'num-found', `${formatNumber(n)} is ${h} on FabriC++.`));
     const row = el('div', 'num-actions');
     row.append(
-      btn('Voice call', 'primary', async () => { await addContact(h).catch(() => {}); calls?.start(h, false); }),
-      btn('Video call', 'ghost', async () => { await addContact(h).catch(() => {}); calls?.start(h, true); }),
-      btn('Message', 'ghost', () => addContact(h).catch((err) => toast(err.message))),
+      btn('FabVoice', 'primary', async () => { await addContact(h).catch(() => {}); calls?.start(h, false); }),
+      btn('FabVid', 'ghost', async () => { await addContact(h).catch(() => {}); calls?.start(h, true); }),
+      btn('FabText', 'ghost', () => addContact(h).catch((err) => toast(err.message))),
     );
     out.append(row, el('p', 'muted small', 'End-to-end encrypted: this never touches the phone network.'));
     return;

@@ -38,8 +38,9 @@ export function frameE2eeMode() {
   return null;
 }
 
-const word = (video) => (video ? 'video' : 'voice');
-const Word = (video) => (video ? 'Video' : 'Voice');
+// Product names: FabVoice™ (voice calls) and FabVid™ (video calls); FabText™ is messaging.
+const word = (video) => (video ? 'FabVid' : 'FabVoice');
+const Word = word;
 const handleOf = (addr) => parseAddr(addr).handle;
 const canShareScreen = () => MEDIA_TEST || Boolean(navigator.mediaDevices?.getDisplayMedia);
 

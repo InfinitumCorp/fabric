@@ -54,7 +54,7 @@ button, input, textarea { font: inherit; color: inherit; }
 
 /* buttons */
 .primary { background: var(--ink); color: var(--on-ink); border: 1px solid var(--line-strong); border-radius: 0; padding: 10px 18px; font-size: 13px; cursor: pointer; }
-.primary:hover { background: var(--accent); border-color: var(--accent); }
+@media (hover: hover) { .primary:hover { background: var(--accent); border-color: var(--accent); } }
 .ghost { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 0; padding: 9px 14px; font-size: 13px; cursor: pointer; }
 .ghost:hover { border-color: var(--text); }
 .link { background: none; border: 0; padding: 0; color: var(--text); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; font-size: inherit; }
@@ -581,3 +581,34 @@ mark { background: #ffe58a; color: inherit; padding: 0 1px; }
 
 /* ---------- brand pass (v0.19.1): native controls in brand ink ---------- */
 input[type="checkbox"], input[type="radio"], input[type="range"], progress { accent-color: var(--ink); }
+
+/* ---------- dial pad (v0.19.1): + → Call a phone number, the Phone screen, touch-tones in a call ---------- */
+.num-form { display: flex; flex-direction: column; gap: 12px; margin: 8px 0; }
+.dial-display { width: 100%; border: 0; border-bottom: 1px solid var(--line); background: transparent; padding: 10px 4px; font-size: 26px; letter-spacing: .02em; text-align: center; color: var(--text); border-radius: 0; }
+.dial-display:focus { outline: none; border-bottom-color: var(--text); }
+.dial-display::placeholder { color: var(--faint); font-size: 18px; letter-spacing: 0; }
+.dialpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); user-select: none; -webkit-user-select: none; }
+.dial-key { background: var(--panel); border: 0; border-radius: 0; min-height: 60px; padding: 6px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; cursor: pointer; color: var(--text); touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.dial-key:hover { background: var(--panel-2); }
+.dial-key:active { background: var(--text); color: var(--on-ink); }
+.dial-key:active .dial-sub { color: var(--on-ink); }
+.dial-digit { font-size: 24px; line-height: 1.1; }
+.dial-sub { font-family: var(--mono); font-size: 9px; letter-spacing: .14em; color: var(--muted); }
+.dial-gap { background: var(--panel); }
+.dial-del svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
+.dial-call { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 14px; font-size: 15px; width: 100%; }
+.dial-call svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+#num-dialog.has-result #num-pad { display: none; }
+#phone-pad { margin: 0 0 12px; }
+#phone-pad .dial-key { min-height: 52px; }
+.phone-call-bar { flex-wrap: wrap; }
+.phone-call-tones { flex-basis: 100%; font-family: var(--mono); letter-spacing: .2em; text-align: center; padding: 4px 0; }
+#phone-call-pad { flex-basis: 100%; }
+#phone-call-pad .dial-key { min-height: 48px; }
+.sheet-item strong sup { font-size: .55em; font-weight: 400; margin-left: 1px; }
+
+/* ---------- boot screen (v0.19.1): the mark and wordmark centered on white until a screen is ready ---------- */
+.boot { position: fixed; inset: 0; z-index: 200; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; background: #ffffff; }
+.boot img { width: 96px; height: 96px; }
+.boot .brand { color: #111820; font-size: 34px; }
+body:has(.screen:not(.hidden)) .boot { display: none; }

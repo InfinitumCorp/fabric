@@ -31,6 +31,8 @@ import {
 } from '/shared/chat.js';
 import { installDesk, SAVED, plainText } from '/desk.js';
 import { installBots } from '/bots-ui.js';
+import { isBotHandle } from '/shared/bots.js';
+import { avatarOf, isNewer, needsProfile, profilePayload, AVATAR_PX } from '/shared/profile.js';
 
 // ---------- local vault (keys + history stay on this device, encrypted) ----------
 // ?profile=name lets several devices/accounts run side by side in one browser for testing.
@@ -646,6 +648,107 @@ async function sendText(text, tr = null, extra = null, to = active) {
     return;
   }
   for (const env of out) deliver(env);
+  shareProfile(to).catch(() => {}); // they get my photo once per version, after the first message
+}
+
+// ---------- profile photo: shared end-to-end encrypted with the people I chat with ----------
+const PHOTO_SKIP = (k) => !k || k === SAVED || isBotHandle(k) || k === '@scalvs.veil';
+
+/** A `profile` payload: a contact's new photo, or (from my other device) my own. */
+function onProfile(payload, c) {
+  const inc = avatarOf(payload);
+  if (!inc) return;
+  if (!c) { // my other device changed my photo, or sent it to one of my chats
+    if (isNewer(db.profile, inc)) { db.profile = inc; db.profileSent = {}; }
+    const k = payload.gid !== undefined ? groupKey(String(payload.gid)) : payload.peer;
+    if (k && db.profile?.v === inc.v) (db.profileSent ??= {})[k] = inc.v;
+  } else {
+    if (!isNewer(c.avatar, inc)) return;
+    c.avatar = inc;
+  }
+  persist().catch(() => {});
+  refreshAvatars();
+}
+
+function refreshAvatars() {
+  renderContacts();
+  if (active) renderThreadHead();
+  if (currentTab === 'settings') renderSettings();
+}
+
+/** Send my current photo (or its removal) to one chat, once per version. */
+async function shareProfile(key) {
+  if (PHOTO_SKIP(key) || !needsProfile(db.profile, db.profileSent, key)) return;
+  if (isGroupKey(key) ? !inGroup(groupFor(key)) : !db.contacts[key]?.list) return;
+  const v = db.profile.v;
+  await sendControl(key, profilePayload(db.profile));
+  (db.profileSent ??= {})[key] = v;
+  await persist();
+}
+
+/** After a change: the chats I've used most recently get it now; the rest with my next message. */
+async function broadcastProfile() {
+  const keys = Object.keys(db.threads)
+    .filter((k) => !PHOTO_SKIP(k) && (isGroupKey(k) ? inGroup(groupFor(k)) : db.contacts[k] && !db.contacts[k].viaGroup))
+    .sort((a, b) => lastTs(b) - lastTs(a))
+    .slice(0, 100);
+  for (const k of keys) {
+    if (db.profile?.v === undefined) return;
+    try { await shareProfile(k); } catch { /* next message retries */ }
+  }
+}
+
+async function setMyPhoto(data) {
+  db.profile = { data, v: Date.now() };
+  db.profileSent = {};
+  await persist();
+  refreshAvatars();
+  toast(data ? 'Profile photo updated' : 'Profile photo removed');
+  broadcastProfile();
+}
+
+/** Crop a square (centre, zoomed by `zoom`, nudged by dx/dy in -1..1) and shrink it to AVATAR_PX. */
+async function squarePhoto(bitmap, { zoom = 1, dx = 0, dy = 0 } = {}) {
+  const side = Math.min(bitmap.width, bitmap.height) / zoom;
+  const sx = (bitmap.width - side) / 2 * (1 + dx);
+  const sy = (bitmap.height - side) / 2 * (1 + dy);
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = AVATAR_PX;
+  const g = cv.getContext('2d');
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(bitmap, sx, sy, side, side, 0, 0, AVATAR_PX, AVATAR_PX);
+  let q = 0.85, out = cv.toDataURL('image/jpeg', q);
+  while (out.length > 60 * 1024 && q > 0.4) { q -= 0.15; out = cv.toDataURL('image/jpeg', q); }
+  return out;
+}
+
+/** An image to draw: an ImageBitmap where the browser can, else a decoded <img> (some Android WebViews). */
+async function decodeImage(file) {
+  try { return await createImageBitmap(file); } catch (e) { console.warn('createImageBitmap failed', e); }
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const out = document.createElement('canvas'); // a canvas copy, so the blob URL can go now
+    out.width = img.naturalWidth; out.height = img.naturalHeight;
+    out.getContext('2d').drawImage(img, 0, 0);
+    return out;
+  } catch (e) { console.warn('image decode failed', e); return null; } finally { URL.revokeObjectURL(url); }
+}
+
+let photoBitmap = null;
+const photoCrop = { zoom: 1, dx: 0, dy: 0 };
+async function renderPhotoPreview() {
+  $('photo-preview').src = await squarePhoto(photoBitmap, photoCrop);
+}
+async function openPhotoDialog(file) {
+  photoBitmap = await decodeImage(file);
+  if (!photoBitmap) { toast("That file isn't an image this device can read"); return; }
+  Object.assign(photoCrop, { zoom: 1, dx: 0, dy: 0 });
+  $('photo-zoom').value = '1';
+  await renderPhotoPreview();
+  $('photo-dialog').showModal();
 }
 
 /** Saved messages: notes to myself, kept on this device (and in backups and linked-device copies). */
@@ -790,6 +893,7 @@ async function processEnvelope(env) {
     spacesUi?.onKey(payload, fromSelf ? db.handle : env.from);
     return;
   }
+  if (payload.kind === 'profile') { onProfile(payload, fromSelf ? null : c); return; }
   // which chat a control payload belongs to: a group I'm in (by gid), else the contact
   const keyOf = () => {
     if (payload.gid !== undefined) {
@@ -1047,7 +1151,19 @@ function avatarEl(h, cls = 'avatar') {
   const a = el('div', cls, (h.replace(/^@/, '')[0] || '?').toUpperCase());
   a.setAttribute('aria-hidden', 'true');
   a.style.background = avatarColor(h);
+  const photo = photoOf(h);
+  if (photo) {
+    const img = new Image();
+    img.alt = ''; img.decoding = 'async'; img.src = photo;
+    a.classList.add('has-photo');
+    a.replaceChildren(img);
+  }
   return a;
+}
+/** A profile photo (data URL) for this handle, if they shared one with me. */
+function photoOf(h) {
+  if (!db) return null;
+  return (h === db.handle ? db.profile?.data : db.contacts?.[h]?.avatar?.data) || null;
 }
 function avatarColor(h) {
   let x = 0;
@@ -1788,6 +1904,9 @@ function svgIcon(d) {
 function renderSettings() {
   if (!db?.handle) return;
   $('settings-avatar').replaceWith(Object.assign(avatarEl(db.handle, 'avatar big'), { id: 'settings-avatar' }));
+  const hasPhoto = Boolean(db.profile?.data);
+  $('photo-pick').textContent = hasPhoto ? 'Change photo' : 'Add photo';
+  $('photo-remove').classList.toggle('hidden', !hasPhoto);
   $('settings-handle').textContent = db.handle;
   $('settings-device').textContent = `${db.deviceName}${db.primary ? ' · primary device' : ' · linked device'}`;
   const p = userPrefs();
@@ -3372,6 +3491,25 @@ $('chat-read').onclick = () => {
 };
 $('chat-delete').onclick = () => { const k = menuChat; closeChatMenu(); if (k) deleteChat(k); };
 document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#chat-menu')) closeChatMenu(); }, true);
+$('photo-pick').onclick = () => $('photo-file').click();
+$('settings-photo').onclick = () => $('photo-file').click();
+$('photo-file').onchange = (e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) openPhotoDialog(f); };
+$('photo-remove').onclick = () => setMyPhoto(null);
+$('photo-zoom').oninput = (e) => { photoCrop.zoom = Number(e.target.value) || 1; renderPhotoPreview(); };
+for (const b of document.querySelectorAll('#photo-move [data-nudge]')) {
+  b.onclick = () => {
+    const [x, y] = b.dataset.nudge.split(',').map(Number);
+    photoCrop.dx = Math.max(-1, Math.min(1, photoCrop.dx + x * 0.25));
+    photoCrop.dy = Math.max(-1, Math.min(1, photoCrop.dy + y * 0.25));
+    renderPhotoPreview();
+  };
+}
+$('photo-cancel').onclick = () => { $('photo-dialog').close(); photoBitmap?.close?.(); photoBitmap = null; };
+$('photo-use').onclick = async () => {
+  const data = await squarePhoto(photoBitmap, photoCrop);
+  $('photo-dialog').close(); photoBitmap?.close?.(); photoBitmap = null;
+  setMyPhoto(data);
+};
 $('pref-receipts').onchange = (e) => { userPrefs().receipts = e.target.checked; persist(); if (active) renderMessages(); };
 $('pref-typing').onchange = (e) => { userPrefs().typing = e.target.checked; persist(); };
 $('pref-notify').onchange = async (e) => {

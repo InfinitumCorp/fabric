@@ -224,12 +224,18 @@
         </header>
         <div class="settings">
           <div class="profile-card">
-            <div id="settings-avatar" class="avatar big" aria-hidden="true"></div>
+            <button type="button" id="settings-photo" class="photo-btn" aria-label="Profile photo"><div id="settings-avatar" class="avatar big" aria-hidden="true"></div></button>
             <div>
               <div id="settings-handle" class="peer"></div>
               <div id="settings-device" class="muted small"></div>
+              <div class="photo-actions">
+                <button type="button" class="ghost small" id="photo-pick">Add photo</button>
+                <button type="button" class="ghost small hidden" id="photo-remove">Remove</button>
+              </div>
+              <input type="file" id="photo-file" accept="image/*" hidden />
             </div>
           </div>
+          <p class="muted small photo-note">Your photo goes end-to-end encrypted to the people you chat with. The relay never sees it.</p>
           <div class="chat-prefs" id="chat-prefs">
             <h3 class="eyebrow">Chats</h3>
             <label class="pref"><input type="checkbox" id="pref-receipts" /><span>Read receipts<small>If off, you won't send or see read receipts.</small></span></label>
@@ -569,5 +575,17 @@
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
   <script type="module" src="/app.js"></script>
+    <dialog id="photo-dialog" class="fwd-dialog photo-dialog">
+      <h3>Profile photo</h3>
+      <img id="photo-preview" class="photo-preview" alt="Preview of your profile photo" />
+      <label class="field"><span>Zoom</span><input type="range" id="photo-zoom" min="1" max="3" step="0.05" value="1" /></label>
+      <div id="photo-move" class="photo-move" role="group" aria-label="Move the crop">
+        <button type="button" class="ghost small" data-nudge="-1,0" aria-label="Move left">←</button>
+        <button type="button" class="ghost small" data-nudge="0,-1" aria-label="Move up">↑</button>
+        <button type="button" class="ghost small" data-nudge="0,1" aria-label="Move down">↓</button>
+        <button type="button" class="ghost small" data-nudge="1,0" aria-label="Move right">→</button>
+      </div>
+      <div class="dialog-actions"><button type="button" class="ghost" id="photo-cancel">Cancel</button><button type="button" class="primary" id="photo-use">Use photo</button></div>
+    </dialog>
 </body>
 </html>

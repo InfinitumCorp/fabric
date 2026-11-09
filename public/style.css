@@ -717,3 +717,14 @@ body:has(.screen:not(.hidden)) .boot { display: none; }
 .poll-mark { font-size: 11px; }
 .poll-edit { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
 @media (max-width: 760px) { .pin-bar { padding-left: 16px; padding-right: 16px; } }
+
+/* profile photos */
+.avatar.has-photo { background: var(--panel-2) !important; overflow: hidden; }
+.avatar.has-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo-btn { padding: 0; border: 0; background: none; cursor: pointer; flex: none; }
+.photo-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.photo-actions { display: flex; gap: 8px; margin-top: 8px; }
+.photo-note { margin: 0; padding: 0 16px 12px; }
+.photo-preview { display: block; width: 200px; height: 200px; margin: 8px auto 12px; border: 1px solid var(--line); object-fit: cover; background: var(--panel-2); }
+.photo-move { display: flex; gap: 8px; justify-content: center; margin-bottom: 12px; }
+.photo-move button { min-width: 44px; }

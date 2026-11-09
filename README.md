@@ -405,6 +405,107 @@ FabriC++'s answer to what the big desktop messengers offer, checked feature by f
 
 On a Mac, `npm run dist` produces a `.dmg` and `.zip`, with camera and microphone usage strings in Info.plist. Builds are unsigned for now: Windows SmartScreen and macOS Gatekeeper will warn until a code-signing certificate is configured (`CSC_LINK` / `CSC_KEY_PASSWORD` for electron-builder). Dev builds keep their own profile ("FabriC++ Dev"), so they never share a vault with the release app.
 
+## Channels and large groups
+
+Small groups (up to 64 people, **New group**) are unchanged: every message is sent pairwise to every
+member's devices and there is no group on the relay at all. For more people, **New large group** and
+**New channel** (in the + sheet, or Settings → Channels and large groups) use a *space* that the relay
+holds: its member list, roles, invite links and one copy of each post.
+
+| | Who posts | What the relay stores | End-to-end encrypted |
+|---|---|---|---|
+| Large group | every member | ciphertext | **yes** |
+| Private channel | owner and admins | ciphertext | **yes** |
+| Public channel (`+name.veil`) | owner and admins | **plain text** | **no** |
+
+**The privacy trade-off, plainly.** A public channel can be read by anyone with its address, including
+people with no account (`GET /api/channels/+name.veil`). There is no one to encrypt to, so its posts
+are stored and served as plain text, and the relay (and anyone who reads the channel) can read them.
+The app says so on the create screen, in the channel header and on the join screen. Don't post
+anything private in a public channel.
+
+Private spaces stay end-to-end encrypted: posts are AES-GCM encrypted on the poster's device with the
+space key. The key travels in the invite link after the `#` (browsers never send that part to the
+relay). When someone is removed, the relay stops serving them at once and refuses their rejoin; the
+admin's device then makes a new key epoch and sends it to every remaining member over their
+one-to-one end-to-end encrypted sessions, and the relay rejects posts under the old epoch. What the
+relay *does* learn about a private space: who the members are, who posted when (for groups; channels
+show the channel, not the admin, to subscribers), reaction emoji counts and view counts. That metadata
+is the price of thousands of members; small groups don't pay it.
+
+- **Roles:** owner (one; makes and removes admins, deletes the space), admins (up to 50; post,
+  invite, remove members, delete posts), members/subscribers (read and react; in groups they post).
+- **Invite links:** any number, optional expiry and use limit, revocable. Public channels also have
+  their `+name.veil` link. A channel address can't be registered as an account and vice versa.
+- **Posts:** reactions from a fixed set (one per person, changeable), view counts (each reader once,
+  counted under a hash that differs per space), delete by author or admins.
+- **Size:** a large group's member cap follows its owner's plan (1,000 free, 20,000 Plus); channels
+  have no practical subscriber limit.
+
+Relay messages (signed-in socket): `space_create`, `space_list`, `space_get`, `space_resolve`,
+`space_join`, `space_leave`, `space_edit`, `space_remove_space`, `space_invite_create`,
+`space_invites`, `space_invite_revoke`, `space_members`, `space_role`, `space_remove`, `space_unban`,
+`space_rotate`, `space_post`, `space_posts`, `space_delete_post`, `space_react`, `space_view`.
+Pushed: `space_post`, `space_unpost`, `space_reacted`, `space_member`, `space_role`, `space_epoch`,
+`space_gone`. Code: `server/spaces.js`, `shared/spaces.js`, `public/spaces.js`.
+
+## FabriC++ Plus
+
+Two plans, enforced by the relay (`shared/tiers.js`, `server/plus.js`):
+
+| | FabriC++ (free) | FabriC++ Plus |
+|---|---|---|
+| Post size in large groups and channels | 1 MB | 8 MB |
+| Devices on one account | 5 | 10 |
+| Members in a large group you own | 1,000 | 20,000 |
+| Channels you own | 10 | 100 |
+| Sponsored posts | contextual, capped | none |
+| Plus mark on your profile | — | yes (can be hidden) |
+
+Encryption is identical on both plans. One-to-one and small-group media still travel inside
+end-to-end encrypted envelopes at the existing size; the larger upload applies to posts in spaces.
+Accounts already over the device limit keep their devices; they just can't add more.
+
+**Payments are off by default and never live.** `FABRIC_PAYMENTS` takes:
+
+- `off` (default): no checkout; operators can still grant plans.
+- `stub`: the app's **Get FabriC++ Plus** button grants Plus for 30 days with no payment at all.
+  For development and demos only.
+- `test`: Stripe **test mode**. `FABRIC_PLUS_CHECKOUT_URL` must be a test-mode Payment Link
+  (`https://buy.stripe.com/test_…`); anything else is ignored. The app opens it with an opaque
+  `client_reference_id` (Stripe never sees the `+name`). Point a test-mode webhook at
+  `POST /api/plus/stripe` with `FABRIC_STRIPE_WEBHOOK_SECRET` (`whsec_…`):
+  `checkout.session.completed` grants 31 days, `invoice.paid` renews. Signatures are checked
+  (5-minute tolerance), events are processed once, and **any event with `livemode: true` is refused**.
+- `live` is refused on purpose. Going live (live keys, tax, refunds, receipts, terms) is a decision
+  for Infinitum, not a config flag.
+
+Operator: `POST /api/plus/grants {handle, tier, days}` (`days: 0` ends a plan),
+`GET /api/plus/grants` lists them. Public: `GET /api/plans`.
+
+## Sponsored posts (ads)
+
+Free-plan accounts see sponsored posts in two places; Plus accounts never see any.
+
+- **Chat list:** one row, the same for every free account. Nothing about the person picks it.
+- **Public channels:** one post in the feed, matched to the channel's topic (set by its owner from a
+  fixed list). Channel owners can turn them off. Private channels and large groups never show ads.
+
+Never used, and not available to the relay anyway: message content, contacts, groups, activity in
+other apps or on websites, device identifiers. No ad network or tracker is connected and the app loads
+no third-party code (the CSP forbids it). Every ad is labelled **Sponsored**, has **Why this ad?**
+(the exact reason, from the relay) and can be hidden. Frequency caps: each campaign at most
+`freqCap` (1–10, default 3) times per person per day, and at most 8 sponsored posts per person per
+day in total. Those counts are kept under a hash keyed with the day and deleted when the day ends,
+so nothing links one day to the next. Clicks are counted once per person per campaign per day and
+open the advertiser's https URL directly, with no click id. Advertisers get totals only.
+
+Operator: campaigns at **`/ads-admin.html`** (needs `FABRIC_OPERATOR_TOKEN`, or a direct local
+request when no token is set), or the API: `GET/POST /api/ads/campaigns`,
+`GET/PATCH /api/ads/campaigns/<id>` with `name, advertiser, headline, body, url (https), cta,
+placement (chatlist|channel), topics, status (active|paused|ended), startsAt, endsAt,
+maxImpressions, freqCap`. Code: `server/ads.js`.
+
 ## Running a relay
 
 State lives in SQLite (`data/fabric.db`, Node's built-in `node:sqlite`, so Node 22.5+). On first start an
@@ -424,6 +525,7 @@ existing `data/state-v3.json` is imported once and renamed to `.imported`.
 | `FABRIC_NUMBER_PEPPER`, `TWILIO_VERIFY_SERVICE_SID` | Linked phone numbers (see docs/number-linking.md): a 32+ character pepper that keys the stored hash, and the Twilio Verify service that texts the codes (uses the Twilio API key or account credentials). `FABRIC_LINK_COUNTRIES` limits calling codes (default +1). `FABRIC_NUMBER_VERIFY=dev` writes codes to the relay log instead, and only works when every `FABRIC_ORIGINS` entry is localhost. |
 | `FABRIC_BURNERS` | `1` turns burner numbers on. Off by default; the app has no burner screens for now. |
 | `FABRIC_BURNER_POOL`, `FABRIC_BURNER_COOLDOWN_DAYS`, `FABRIC_BURNER_CHECKOUT_URL` | Burner numbers, when on (see Burner numbers). |
+| `FABRIC_PAYMENTS`, `FABRIC_PLUS_CHECKOUT_URL`, `FABRIC_STRIPE_WEBHOOK_SECRET` | FabriC++ Plus checkout: `off` (default), `stub` or Stripe `test` mode only (see FabriC++ Plus). |
 | `FABRIC_SUPABASE_STORE`, `FABRIC_SUPABASE_KEY`, `FABRIC_BACKUP_KEY` | Supabase as system of record (see below). |
 | `FABRIC_BACKUP_NAME`, `FABRIC_BACKUP_MINUTES` | Snapshot name (default `relay`) and how often to check for changes (default 2 minutes). |
 

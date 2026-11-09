@@ -228,6 +228,25 @@
             <label class="pref"><input type="checkbox" id="pref-notify" /><span>Notifications<small>New messages while the app is in the background. Muted chats stay quiet.</small></span></label>
             <label class="pref pref-select"><span>Theme</span><select id="pref-theme"><option value="light">Light (default)</option><option value="dark">Dark</option><option value="system">Match this device</option></select></label>
           </div>
+          <div class="chat-prefs hidden" id="number-card">
+            <h3 class="eyebrow">Your phone number</h3>
+            <p class="muted small">Link the number on your phone so FabriC++ users who call or text it reach you end-to-end encrypted instead. The relay keeps only a keyed hash of it, never the number. Calls and texts from regular phones still go over the phone network, unencrypted.</p>
+            <form id="number-form" class="row number-form">
+              <input id="number-input" class="text-input" type="tel" inputmode="tel" autocomplete="tel" placeholder="+1 555 123 4567" aria-label="Your phone number" />
+              <button class="primary" type="submit">Send code</button>
+            </form>
+            <form id="code-form" class="row number-form hidden">
+              <input id="code-input" class="text-input mono" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="Code from the text" aria-label="Code from the text" />
+              <button class="primary" type="submit">Confirm</button>
+              <button id="code-cancel" class="ghost" type="button">Cancel</button>
+            </form>
+            <div id="number-linked" class="hidden">
+              <div class="number-row"><strong id="number-mine"></strong><span id="number-when" class="muted small"></span></div>
+              <label class="pref"><input type="checkbox" id="number-discoverable" /><span>Let people find me by my number<small>FabriC++ users who have your number can call or message you here, encrypted. Off: looking up your number finds no one.</small></span></label>
+              <button id="number-unlink" class="ghost" type="button">Unlink number</button>
+            </div>
+            <p id="number-msg" class="small" role="status"></p>
+          </div>
           <ul class="settings-list">
             <li><button type="button" data-go="security" data-focus="sec-card"><span>Privacy and security</span><small>Passphrase, app lock, safety numbers</small></button></li>
             <li><button type="button" data-go="security" data-focus="dev-card"><span>Linked devices</span><small>Phones and computers on this account</small></button></li>
@@ -510,11 +529,21 @@
     <button type="button" class="sheet-item" data-new="voice"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a1 1 0 01-1 1A16 16 0 014 5a1 1 0 011-1z"/></svg></span><span><strong>Voice call</strong><small>End-to-end encrypted</small></span></button>
     <button type="button" class="sheet-item" data-new="video"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12"/><path d="M16 10l5-3v10l-5-3"/></svg></span><span><strong>Video call</strong><small>End-to-end encrypted</small></span></button>
     <button type="button" class="sheet-item" data-new="group"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 19c0-3 3-5 6-5s6 2 6 5M16 5a3 3 0 010 6M18 14c2 .6 3 2.4 3 5"/></svg></span><span><strong>New group</strong><small>Up to 64 people</small></span></button>
-    <button type="button" class="sheet-item" data-new="phone"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2" width="10" height="20"/><path d="M11 18h2"/></svg></span><span><strong>Call a phone number</strong><small>From your FABRIC number</small></span></button>
+    <button type="button" class="sheet-item" data-new="phone"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2" width="10" height="20"/><path d="M11 18h2"/></svg></span><span><strong>Call a phone number</strong><small>Encrypted when they're on FabriC++</small></span></button>
     <div class="sheet-sep" aria-hidden="true"></div>
     <button type="button" class="sheet-item" data-new="calls"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span><span><strong>Recent calls</strong><small>Call history</small></span></button>
     <button type="button" class="sheet-item" data-new="settings"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></span><span><strong>Settings</strong><small>Account, devices, privacy, appearance</small></span></button>
     <button type="button" class="sheet-cancel" data-new="cancel">Cancel</button>
+  </dialog>
+
+  <dialog id="num-dialog" class="fwd-dialog" aria-label="Call or message a phone number">
+    <h3>Call a phone number</h3>
+    <form id="num-form" class="row number-form">
+      <input id="num-input" class="text-input" type="tel" inputmode="tel" placeholder="+1 555 123 4567" aria-label="Phone number" />
+      <button class="primary" type="submit">Find</button>
+    </form>
+    <div id="num-result" class="num-result" role="status"></div>
+    <button id="num-close" class="ghost" type="button">Close</button>
   </dialog>
 
   <dialog id="pick-dialog" class="fwd-dialog" aria-label="Choose a contact">

@@ -28,6 +28,7 @@ import { openStore } from './store.js';
 import { backupFromEnv, createBackup } from './backup.js';
 import { defaultLimits, MAX_SOCKETS_PER_IP, DAILY_CAPS } from './limits.js';
 import { phoneFromEnv, createPhone, E164_RE } from './phone.js';
+import { linksFromEnv, createLinks } from './links.js';
 import { createSfu } from './sfu.js';
 import { createModelProxy, modelsFromEnv } from './models.js';
 import { createSfuCluster, clusterFromEnv } from './sfu-cluster.js';
@@ -112,6 +113,9 @@ export async function createRelay({
   limits = defaultLimits(),
   heartbeatMs = HEARTBEAT_MS,
   phone = phoneFromEnv(),
+  links = linksFromEnv(),
+  linkVerifier = undefined, // tests
+  linkClock = undefined,    // tests
   fetchImpl = globalThis.fetch,
   modelFetch = undefined, // model downloads: node http by default (see server/models.js)
   sfu = sfuFromEnv(),
@@ -138,6 +142,12 @@ export async function createRelay({
   const socketsOf = (handle) => [...online.entries()].filter(([a]) => parseAddr(a).handle === handle).map(([, w]) => w);
   const phoneSvc = phone
     ? createPhone({ cfg: phone, store, log, fetchImpl, notify: (h, msg) => { for (const w of socketsOf(h)) send(w, msg); } })
+    : null;
+  // linked phone numbers: dev mode (codes in the log) only when every allowed origin is local
+  const localOnly = origins.length > 0 && origins.every((o) => /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(o));
+  if (links?.mode === 'dev' && !localOnly) { log('FABRIC_NUMBER_VERIFY=dev ignored: a non-local origin is allowed'); links = null; }
+  const linksSvc = links
+    ? createLinks({ cfg: links, store, log, fetchImpl, verifier: linkVerifier, ...(linkClock ? { now: linkClock } : {}), notify: (h, msg) => { for (const w of socketsOf(h)) send(w, msg); } })
     : null;
   // large calls: on separate media nodes when FABRIC_SFU_NODES lists them, else in this process
   const toMember = (addr, msg) => send(online.get(addr), msg);
@@ -795,6 +805,12 @@ export async function createRelay({
             if (typeof r === 'string') return fail(r);
             if (r) send(ws, { ...r, ref: msg.ref });
             return;
+          }
+          if (/^number_/.test(String(msg.type))) {
+            if (limited(limits.misc, me.addr)) return;
+            if (!linksSvc) return msg.type === 'number_status' ? send(ws, { type: 'number_status', ref: msg.ref, enabled: false }) : fail('linking phone numbers is not available on this relay');
+            const reply = (m) => send(ws, { ...m, ref: msg.ref });
+            if ((await linksSvc.ws(me, msg, reply, fail)) !== false) return;
           }
           if (/^(phone_|sms_|burner_)/.test(String(msg.type))) {
             if (limited(limits.misc, me.addr)) return;

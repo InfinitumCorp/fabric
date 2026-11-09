@@ -41,7 +41,10 @@ CREATE TABLE IF NOT EXISTS burner_bundles (id TEXT PRIMARY KEY, handle TEXT NOT 
 CREATE INDEX IF NOT EXISTS burner_bundles_handle ON burner_bundles (handle);
 CREATE TABLE IF NOT EXISTS cid_links (key TEXT PRIMARY KEY, handle TEXT NOT NULL UNIQUE, linked_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS cloud_backups (handle TEXT PRIMARY KEY, blob TEXT NOT NULL, updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS phone_links (number_mac TEXT PRIMARY KEY, handle TEXT NOT NULL UNIQUE, verified_at INTEGER NOT NULL, discoverable INTEGER NOT NULL DEFAULT 0);
 `;
+
+const linkRow = (r) => (r ? { mac: r.number_mac, handle: r.handle, verifiedAt: r.verified_at, discoverable: Boolean(r.discoverable) } : null);
 
 export function openStore(file = null, { importJson = null } = {}) {
   if (file) fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -241,6 +244,21 @@ export function openStore(file = null, { importJson = null } = {}) {
       .map((r) => ({ seq: r.seq, at: JSON.parse(r.body).at, cents: r.cents, fab: r.fab, hash: r.hash })),
 
     // ----- inspection (tests, operators) -----
+    // ----- linked phone numbers: HMAC(pepper, number) -> account, never the number itself -----
+    numberLinkOf: (handle) => linkRow(db.prepare('SELECT * FROM phone_links WHERE handle = ?').get(String(handle))),
+    numberLinkByMac: (mac) => linkRow(db.prepare('SELECT * FROM phone_links WHERE number_mac = ?').get(String(mac))),
+    /** Links a number to an account; returns who had it before (a recycled number), if anyone. */
+    linkNumber(mac, handle, at, discoverable = false) {
+      let prev = null;
+      store.tx(() => {
+        prev = db.prepare('SELECT handle FROM phone_links WHERE number_mac = ?').get(String(mac))?.handle || null;
+        db.prepare('DELETE FROM phone_links WHERE number_mac = ? OR handle = ?').run(String(mac), String(handle));
+        db.prepare('INSERT INTO phone_links (number_mac, handle, verified_at, discoverable) VALUES (?, ?, ?, ?)').run(String(mac), String(handle), at, discoverable ? 1 : 0);
+      });
+      return prev;
+    },
+    unlinkNumber: (handle) => db.prepare('DELETE FROM phone_links WHERE handle = ?').run(String(handle)),
+    setNumberDiscoverable: (handle, on) => db.prepare('UPDATE phone_links SET discoverable = ? WHERE handle = ?').run(on ? 1 : 0, String(handle)),
     // ----- phone (PSTN through a carrier; not end-to-end encrypted) -----
     numberOf: (handle) => db.prepare('SELECT number FROM phone_numbers WHERE handle = ?').get(String(handle))?.number || null,
     handleOfNumber: (number) => db.prepare('SELECT handle FROM phone_numbers WHERE number = ?').get(String(number))?.handle || null,

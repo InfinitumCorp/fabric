@@ -568,3 +568,13 @@ mark { background: #ffe58a; color: inherit; padding: 0 1px; }
   .tab-new .new-plus svg { width: 26px; height: 26px; }
   .view-head .back { display: inline-grid; margin-left: -6px; }
 }
+
+/* ---------- linked phone numbers (v0.19) ---------- */
+.number-form { gap: 8px; margin: 8px 0; flex-wrap: nowrap; }
+.number-form input { flex: 1; min-width: 0; }
+.number-row { display: flex; flex-direction: column; gap: 2px; margin: 8px 0; }
+#number-unlink { margin-top: 8px; }
+.num-result { margin: 4px 0 12px; }
+.num-result p { margin: 6px 0; }
+.num-found { font-weight: 600; }
+.num-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }

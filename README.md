@@ -9,7 +9,7 @@ Product spec: https://infinitum-corporation.vercel.app/products/fabric
 ```bash
 npm install
 npm start          # http://localhost:8787
-npm test           # 142 tests: groups, photos, files and voice messages, read receipts, typing, pinned/muted/archived chats, message actions (reply, edit, delete, reactions, forward), post-quantum session setup, Supabase snapshots, burner numbers, open on-device models and outgoing translation, calls at scale (TURN, simulcast, SFU nodes), Cumulus://ID sign-in, on-device AI, QR linking, sealed sender, large calls (SFU), phone, group calls, relay hardening, frame crypto, devices, backups, vault, ratchet, sessions, economy
+npm test           # 148 tests: linked phone numbers, groups, photos, files and voice messages, read receipts, typing, pinned/muted/archived chats, message actions (reply, edit, delete, reactions, forward), post-quantum session setup, Supabase snapshots, burner numbers, open on-device models and outgoing translation, calls at scale (TURN, simulcast, SFU nodes), Cumulus://ID sign-in, on-device AI, QR linking, sealed sender, large calls (SFU), phone, group calls, relay hardening, frame crypto, devices, backups, vault, ratchet, sessions, economy
 ```
 
 To try two users in one browser, open `http://localhost:8787/?profile=alex` and
@@ -266,6 +266,7 @@ existing `data/state-v3.json` is imported once and renamed to `.imported`.
 | `FABRIC_SFU_NODES`, `FABRIC_SFU_NODE_SECRET`, `FABRIC_SFU_NODE_CAP` | Separate SFU media nodes (see Several SFU nodes per room). |
 | `FABRIC_TURN_URLS`, `FABRIC_TURN_SECRET`, `FABRIC_TURN_TTL` | TURN server run by the operator, with short-lived logins (see Operator TURN). |
 | `FABRIC_MODELS`, `FABRIC_MODEL_SOURCE`, `FABRIC_MODEL_DIR` | Open on-device models (see On-device AI beyond Chrome). |
+| `FABRIC_NUMBER_PEPPER`, `TWILIO_VERIFY_SERVICE_SID` | Linked phone numbers (see docs/number-linking.md): a 32+ character pepper that keys the stored hash, and the Twilio Verify service that texts the codes (uses the Twilio API key or account credentials). `FABRIC_LINK_COUNTRIES` limits calling codes (default +1). `FABRIC_NUMBER_VERIFY=dev` writes codes to the relay log instead, and only works when every `FABRIC_ORIGINS` entry is localhost. |
 | `FABRIC_BURNERS` | `1` turns burner numbers on. Off by default; the app has no burner screens for now. |
 | `FABRIC_BURNER_POOL`, `FABRIC_BURNER_COOLDOWN_DAYS`, `FABRIC_BURNER_CHECKOUT_URL` | Burner numbers, when on (see Burner numbers). |
 | `FABRIC_SUPABASE_STORE`, `FABRIC_SUPABASE_KEY`, `FABRIC_BACKUP_KEY` | Supabase as system of record (see below). |

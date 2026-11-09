@@ -1,6 +1,6 @@
 # Linking real phone numbers to FabriC++ accounts
 
-Status: plan, not built. Written 2026-11-09.
+Status: Phase 1 built 2026-11-09 (server/links.js, test/phone-links.test.js, Settings → Your phone number, + → Call a phone number). Phases 2 and 3 not built.
 
 ## What we want
 

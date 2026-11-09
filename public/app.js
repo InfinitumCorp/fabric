@@ -18,7 +18,7 @@ import { createAi, installFakeModels, hideBuiltInModels } from '/ai.js';
 import { languageName } from '/shared/ai.js';
 import { TRANSLATION_LANGS } from '/shared/models.js';
 import { createCalls } from '/calls.js';
-import { createPhone } from '/phone.js';
+import { createPhone, toE164, formatNumber } from '/phone.js';
 import { seal, peekSealed, openSealed, isDeliveryKey } from '/shared/sealed.js';
 import { applyAction, actionPayload, quoteOf, extrasOf, reactionSummary, QUICK_REACTIONS } from '/shared/actions.js';
 import {
@@ -329,6 +329,7 @@ async function handle(msg) {
       setConn('connected', true);
       phone ??= createPhone({ request, inCall: () => Boolean(calls?.active), vault: { get: () => (db.burners ??= { records: [], byPeer: {} }), save: () => persist() } });
       phone.refresh();
+      request({ type: 'number_status' }).then(onNumberStatus).catch(() => {});
       await adoptOwnList(msg.list);
       if (onboardWait) { onboardWait.resolve(); onboardWait = null; }
       flushOutbox();
@@ -345,6 +346,9 @@ async function handle(msg) {
       return;
     case 'phone_status':
       return phone?.onStatus(msg);
+    case 'number_status':
+    case 'number_linked':
+      return onNumberStatus(msg);
     case 'phone_event':
       return phone?.onEvent(msg.event);
     case 'account':
@@ -501,7 +505,17 @@ function systemLine(peer, text) {
   (db.threads[peer] ??= []).push({ id: 'sys-' + Date.now() + Math.random(), from: '@system', text, ts: Date.now() });
 }
 
+/** Digits, spaces and phone punctuation, 7+ digits, no letters: a phone number, not a handle. */
+const looksLikeNumber = (s) => /^[+\d][\d\s().-]*$/.test(String(s).trim()) && String(s).replace(/\D/g, '').length >= 7;
+const defaultCountry = () => numberStatus?.countries?.[0] || '+1';
+
 async function addContact(raw) {
+  if (looksLikeNumber(raw)) {
+    const n = toE164(raw, defaultCountry());
+    const found = n && await lookupNumber(n);
+    if (!found) throw new Error(`No one on FabriC++ is findable at ${formatNumber(n || raw)}.`);
+    return addContact(found);
+  }
   const h = normalizeHandle(raw);
   if (!isValidHandle(h)) throw new Error('Use letters, numbers or _ (2–24), like +alex.veil');
   if (h === db.handle) throw new Error("That's you.");
@@ -2040,11 +2054,140 @@ function startNew(kind) {
   if (kind === 'voice') return openPicker('Voice call', (h) => calls?.start(h, false));
   if (kind === 'video') return openPicker('Video call', (h) => calls?.start(h, true));
   if (kind === 'group') return openNewGroup();
-  if (kind === 'phone' || kind === 'calls' || kind === 'settings') {
+  if (kind === 'phone') return openNumberDialog();
+  if (kind === 'calls' || kind === 'settings') {
     if (active) closeThread();
     return switchTab(kind);
   }
 }
+
+// ---------- linked phone numbers ----------
+let numberStatus = null;
+async function lookupNumber(n) {
+  try {
+    const r = await request({ type: 'number_lookup', numbers: [n] });
+    return r.results?.[n] || null;
+  } catch (e) {
+    if (/not available/.test(e.message)) return null;
+    throw e;
+  }
+}
+function onNumberStatus(msg) {
+  numberStatus = msg;
+  if (msg.reason === 'claimed' && db.myNumber) {
+    toast(`${formatNumber(db.myNumber)} was verified by another account, so it's no longer linked to yours.`);
+    delete db.myNumber;
+    persist();
+  }
+  if (!msg.linked && db.myNumber && !numberPending) { delete db.myNumber; persist(); }
+  renderNumber();
+}
+let numberPending = null; // the number a code was sent to
+function numberMsg(text, bad = false) {
+  $('number-msg').textContent = text;
+  $('number-msg').classList.toggle('error', bad);
+}
+function renderNumber() {
+  const st = numberStatus;
+  $('number-card').classList.toggle('hidden', !st?.enabled);
+  if (!st?.enabled) return;
+  const linked = st.linked && !st.linked.expired;
+  $('number-form').classList.toggle('hidden', Boolean(linked || numberPending));
+  $('code-form').classList.toggle('hidden', !numberPending || Boolean(linked));
+  $('number-linked').classList.toggle('hidden', !linked);
+  if (linked) {
+    $('number-mine').textContent = db.myNumber ? formatNumber(db.myNumber) : 'Linked (verified on another device)';
+    $('number-when').textContent = `Verified ${new Date(st.linked.verifiedAt).toLocaleDateString()} · renew by ${new Date(st.linked.expiresAt).toLocaleDateString()}`;
+    $('number-discoverable').checked = st.linked.discoverable;
+  } else if (st.linked?.expired && !numberPending) {
+    numberMsg('Your link lapsed after a year. Verify the number again to keep it.');
+  }
+}
+$('number-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const n = toE164($('number-input').value, defaultCountry());
+  if (!n) return numberMsg('Enter your full number, like +1 555 123 4567.', true);
+  const btn = e.submitter;
+  if (btn) btn.disabled = true;
+  try {
+    await request({ type: 'number_verify_start', number: n });
+    numberPending = n;
+    numberMsg(`We texted a code to ${formatNumber(n)}.`);
+    renderNumber();
+    $('code-input').value = '';
+    $('code-input').focus();
+  } catch (err) {
+    numberMsg(err.message, true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+};
+$('code-form').onsubmit = async (e) => {
+  e.preventDefault();
+  try {
+    const r = await request({ type: 'number_verify_check', code: $('code-input').value.trim() });
+    db.myNumber = numberPending;
+    numberPending = null;
+    persist();
+    onNumberStatus(r);
+    numberMsg('Linked. Turn on "Let people find me by my number" when you want FabriC++ users to reach you through it.');
+  } catch (err) {
+    numberMsg(err.message, true);
+    if (/send a new one/.test(err.message)) { numberPending = null; renderNumber(); }
+  }
+};
+$('code-cancel').onclick = () => { numberPending = null; numberMsg(''); renderNumber(); };
+$('number-discoverable').onchange = async (e) => {
+  try { onNumberStatus(await request({ type: 'number_discoverable', on: e.target.checked })); } catch (err) { numberMsg(err.message, true); renderNumber(); }
+};
+$('number-unlink').onclick = async () => {
+  if (!confirm('Unlink your phone number? FabriC++ users will no longer find you by it.')) return;
+  try {
+    delete db.myNumber;
+    persist();
+    onNumberStatus(await request({ type: 'number_unlink' }));
+    numberMsg('Unlinked.');
+  } catch (err) { numberMsg(err.message, true); }
+};
+
+/** + → Call a phone number: encrypted when the number belongs to someone on FabriC++. */
+function openNumberDialog() {
+  $('num-input').value = '';
+  $('num-result').replaceChildren();
+  $('num-dialog').showModal();
+  $('num-input').focus();
+}
+$('num-close').onclick = () => $('num-dialog').close();
+$('num-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const out = $('num-result');
+  const n = toE164($('num-input').value, defaultCountry());
+  out.replaceChildren();
+  if (!n) return out.append(el('p', 'error small', 'Enter a full number, like +1 555 123 4567.'));
+  out.append(el('p', 'muted small', 'Looking it up…'));
+  let h = null;
+  try { h = await lookupNumber(n); } catch (err) { out.replaceChildren(el('p', 'error small', err.message)); return; }
+  out.replaceChildren();
+  const btn = (label, cls, fn) => { const b = el('button', cls, label); b.type = 'button'; b.onclick = () => { $('num-dialog').close(); fn(); }; return b; };
+  if (h) {
+    out.append(el('p', 'num-found', `${formatNumber(n)} is ${h} on FabriC++.`));
+    const row = el('div', 'num-actions');
+    row.append(
+      btn('Voice call', 'primary', async () => { await addContact(h).catch(() => {}); calls?.start(h, false); }),
+      btn('Video call', 'ghost', async () => { await addContact(h).catch(() => {}); calls?.start(h, true); }),
+      btn('Message', 'ghost', () => addContact(h).catch((err) => toast(err.message))),
+    );
+    out.append(row, el('p', 'muted small', 'End-to-end encrypted: this never touches the phone network.'));
+    return;
+  }
+  out.append(el('p', 'small', `No one on FabriC++ is findable at ${formatNumber(n)}.`));
+  if (phone?.status?.enabled) {
+    out.append(btn('Call over the phone network', 'ghost', () => { switchTab('phone'); phone.dial(n); }),
+      el('p', 'muted small', 'Not end-to-end encrypted: the carrier handles the call.'));
+  } else {
+    out.append(el('p', 'muted small', 'Calls to regular phones are not set up on this relay.'));
+  }
+};
 
 // ---------- thread menu and in-chat search ----------
 let threadQuery = '';

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Sponsored posts · operator</title>
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/spaces.css" />
+  <link rel="stylesheet" href="/ads-admin.css" />
+</head>
+<body class="ad-admin">
+  <header class="ad-top">
+    <div class="brand small">FabriC++<sup>™</sup></div>
+    <h1>Sponsored posts</h1>
+    <p class="muted small">Operator page. Campaigns are contextual only: the chat-list slot is the same for every free-plan account, and channel ads match a public channel's topic. Nothing here can target a person, and no ad network is connected.</p>
+    <form id="tok" class="row">
+      <input id="tok-in" class="text-input" type="password" autocomplete="off" placeholder="Operator token (blank on a local relay without one)" aria-label="Operator token" />
+      <button class="ghost" type="submit">Use</button>
+    </form>
+  </header>
+  <main class="ad-main">
+    <section>
+      <h2 class="eyebrow">New campaign</h2>
+      <form id="new" class="ad-form">
+        <label class="field"><span>Campaign name</span><input name="name" maxlength="80" required /></label>
+        <label class="field"><span>Advertiser</span><input name="advertiser" maxlength="40" required /></label>
+        <label class="field"><span>Headline</span><input name="headline" maxlength="60" required /></label>
+        <label class="field"><span>Text</span><input name="body" maxlength="200" /></label>
+        <label class="field"><span>Link (https)</span><input name="url" type="url" required placeholder="https://" /></label>
+        <label class="field"><span>Button</span><input name="cta" maxlength="20" placeholder="Learn more" /></label>
+        <label class="field"><span>Placement</span><select name="placement"><option value="chatlist">Chat list slot (free plan, everyone alike)</option><option value="channel">Public channels (by topic)</option></select></label>
+        <fieldset class="field" id="topics"><span>Channel topics (none = any public channel)</span><div id="topic-boxes" class="ad-topics"></div></fieldset>
+        <label class="field"><span>Per person per day</span><input name="freqCap" type="number" min="1" max="10" value="3" /></label>
+        <label class="field"><span>Impression budget</span><input name="maxImpressions" type="number" min="1" placeholder="No limit" /></label>
+        <label class="field"><span>Ends</span><input name="endsAt" type="date" /></label>
+        <label class="pref"><input type="checkbox" name="active" /><span>Start now<small>Otherwise it is saved paused.</small></span></label>
+        <p id="new-err" class="error small"></p>
+        <button class="primary" type="submit">Create campaign</button>
+      </form>
+      <h2 class="eyebrow">Preview</h2>
+      <ol class="sp-posts ad-preview"><li class="sp-ad"><div class="sp-ad-head"><span class="sp-ad-label">Sponsored</span><span class="muted small" id="pv-adv">Advertiser</span><span class="sp-ad-why">Why this ad?</span></div><strong class="sp-ad-title" id="pv-head">Headline</strong><div class="sp-ad-body small" id="pv-body"></div><span class="ghost sp-ad-cta" id="pv-cta">Learn more ↗</span></li></ol>
+    </section>
+    <section>
+      <h2 class="eyebrow">Campaigns</h2>
+      <p id="list-err" class="error small"></p>
+      <table class="sp-compare ad-table"><thead><tr><th>Campaign</th><th>Placement</th><th>Status</th><th>Shown</th><th>Clicks</th><th></th></tr></thead><tbody id="rows"></tbody></table>
+      <p class="muted small">Advertisers get these totals only: no lists of who saw or clicked. Per-person counts exist only for the frequency cap, under a hash that changes every day, and are deleted when the day ends.</p>
+    </section>
+  </main>
+  <script type="module" src="/ads-admin.js"></script>
+</body>
+</html>

@@ -10,6 +10,8 @@
 // the recipient learns the sender. The relay checks the recipient's delivery key instead.
 // v0.12 Cumulus://ID: addresses can be linked to a CID account (OpenID Connect, server/cid.js),
 // which also keeps the account's encrypted backup for restoring on a new device.
+// Scalvs: SCALVS.ai as the contact +scalvs.veil (server/scalvs.js), an ordinary device the relay
+// starts next to itself. The relay only reserves the handle for Scalvs's account key.
 
 import http from 'node:http';
 import https from 'node:https';
@@ -35,6 +37,8 @@ import { createSfuCluster, clusterFromEnv } from './sfu-cluster.js';
 import { newDeliveryKey, isDeliveryKey, isSealed } from '../shared/sealed.js';
 import { cidFromEnv, createCid } from './cid.js';
 import { turnFromEnv, turnCredentials } from './turn.js';
+import { createScalvs, scalvsFromEnv, isScalvsAccount, SCALVS_HANDLE } from './scalvs.js';
+import { aiFromEnv, createAi } from './scalvs-ai.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MAX_ENVELOPE_BYTES = 512 * 1024; // link payloads carry a history snapshot
@@ -124,9 +128,14 @@ export async function createRelay({
   turn = turnFromEnv(),
   sfuNodes = clusterFromEnv(),
   models = modelsFromEnv(process.env, ROOT),
+  scalvs = null, // { stateFile, ai }: run Scalvs next to this relay (see scalvsFromEnv)
 } = {}) {
   const store = openStore(dataFile, { importJson: dataFile ? legacyJson : null });
   const relayIdentity = await generateIdentity(); // per-process; used only for ownership proofs
+  // Scalvs's keys are loaded before the relay listens, so its handle is reserved from the start.
+  // `ai` is either a config from aiFromEnv or (tests) anything with ask(handle, text).
+  const scalvsAi = !scalvs?.ai ? null : typeof scalvs.ai.ask === 'function' ? scalvs.ai : createAi({ ...scalvs.ai, log });
+  const bot = scalvs ? await createScalvs({ stateFile: scalvs.stateFile ?? null, ai: scalvsAi, log }) : null;
   const online = new Map(); // "handle#device" -> ws
   const mailboxes = new Map(); // id -> { ws, expires }
   const socketsPerIp = new Map();
@@ -306,6 +315,7 @@ export async function createRelay({
       // TURN logins are only handed out over a signed-in socket ('ice'), never here
       if (url.pathname === '/api/models') return json(200, { available: Boolean(modelProxy) });
       if (url.pathname === '/api/ice') return json(200, { iceServers, sfu: Boolean(sfuSvc), turn: Boolean(turn) });
+      if (url.pathname === '/api/scalvs') return json(200, { enabled: Boolean(bot), handle: bot ? bot.handle : null, ai: Boolean(scalvsAi) });
       if (url.pathname === '/api/cid') return json(200, { enabled: Boolean(cidSvc), required: Boolean(cidSvc && cid.required) });
       if (url.pathname === '/api/cid/backup') {
         if (!cidSvc) return json(404, { error: 'Cumulus://ID is not set up on this relay' });
@@ -639,6 +649,8 @@ export async function createRelay({
         } catch (e) {
           return fail(existing && /account key changed/.test(e.message) ? 'handle taken' : e.message);
         }
+        // +scalvs.veil belongs to Scalvs's account key, even while Scalvs is turned off
+        if (handle === SCALVS_HANDLE && !isScalvsAccount(bot, payload.account)) return fail('handle reserved');
         const dev = findDevice(payload, deviceId);
         if (!dev) return fail('device not on the account');
         // with FABRIC_CID_REQUIRED=1 a new address needs a CID that has none yet (sybil resistance)
@@ -859,16 +871,21 @@ export async function createRelay({
     cidSvc = createCid({ ...cid, redirectUri: `${base}/cid-callback.html`, secret: store.secret('cid'), fetchImpl });
     log(`[relay] Cumulus://ID sign-in via ${cid.issuer}${cid.required ? ' (required for new addresses)' : ''}`);
   }
+  // Scalvs signs in over loopback like any client (the relay's own certificate, so no CA check)
+  const scalvsReady = bot ? bot.start(`${tls ? 'https' : 'http'}://127.0.0.1:${actualPort}`, tls ? { rejectUnauthorized: false } : {}) : null;
   return {
     port: actualPort,
     url: `${tls ? 'https' : 'http'}://localhost:${actualPort}`,
     store,
     limits,
     settle,
+    scalvs: bot,
+    scalvsReady,
     expirePhone: () => phoneSvc?.expire(),
     verifyLedger: () => store.verifyLedger(),
     close: () => new Promise((r) => {
       for (const t of timers) clearInterval(t);
+      bot?.stop();
       sfuSvc?.close();
       for (const c of wss.clients) c.terminate();
       wss.close();
@@ -884,8 +901,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const backupCfg = backupFromEnv();
   const backup = backupCfg ? createBackup(backupCfg) : null;
   if (backup) await backup.restoreIfMissing(dataFile); // a fresh host picks up where the last one stopped
-  const relay = await createRelay({ port, dataFile });
+  const scalvs = scalvsFromEnv(process.env, dataFile);
+  const relay = await createRelay({ port, dataFile, scalvs: scalvs && { ...scalvs, ai: aiFromEnv() } });
   console.log(`FABRIC relay listening on ${relay.url}`);
+  if (scalvs) console.log(`[relay] Scalvs runs tasks as +scalvs.veil (AI tasks ${aiFromEnv() ? 'on' : 'off: set FABRIC_SCALVS_AI_KEY to turn them on'})`);
   if (backup) {
     await backup.start(relay.store);
     console.log(`[backup] snapshots to Supabase every ${backupCfg.intervalMs / 60_000} min when data changes`);

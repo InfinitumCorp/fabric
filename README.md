@@ -9,7 +9,7 @@ Product spec: https://infinitum-corporation.vercel.app/products/fabric
 ```bash
 npm install
 npm start          # http://localhost:8787
-npm test           # 148 tests: linked phone numbers, groups, photos, files and voice messages, read receipts, typing, pinned/muted/archived chats, message actions (reply, edit, delete, reactions, forward), post-quantum session setup, Supabase snapshots, burner numbers, open on-device models and outgoing translation, calls at scale (TURN, simulcast, SFU nodes), Cumulus://ID sign-in, on-device AI, QR linking, sealed sender, large calls (SFU), phone, group calls, relay hardening, frame crypto, devices, backups, vault, ratchet, sessions, economy
+npm test           # 160 tests: Scalvs (+scalvs.veil tasks), linked phone numbers, groups, photos, files and voice messages, read receipts, typing, pinned/muted/archived chats, message actions (reply, edit, delete, reactions, forward), post-quantum session setup, Supabase snapshots, burner numbers, open on-device models and outgoing translation, calls at scale (TURN, simulcast, SFU nodes), Cumulus://ID sign-in, on-device AI, QR linking, sealed sender, large calls (SFU), phone, group calls, relay hardening, frame crypto, devices, backups, vault, ratchet, sessions, economy
 ```
 
 To try two users in one browser, open `http://localhost:8787/?profile=alex` and
@@ -217,6 +217,44 @@ token (`local-demo-operator-token`) for granting a bundle with curl.
 `.claude/launch.json` has a `fabric-phone-demo` relay (port 8788, its own database) with placeholder Twilio
 values. It shows the Phone tab and gets as far as Twilio, which then refuses the fake credentials.
 
+## Scalvs (+scalvs.veil): text tasks to SCALVS.ai
+
+Scalvs is SCALVS.ai, Infinitum's AI workforce, as a FabriC++
+contact. Add **+scalvs** (the app turns it into +scalvs.veil) and text it a task. It does the task and
+replies in the same chat, with a read receipt and a typing indicator while it works.
+
+| Send | Scalvs does |
+|---|---|
+| `help` | lists what it can do |
+| `calc 2*(3+4)^2`, or just `7*6` | arithmetic (parsed, never `eval`) |
+| `time`, `time Europe/Berlin` | current date and time |
+| `remind me in 20m to call Ana` | texts you back when it's due (s, m, h, d; up to 7 days, 10 at a time) |
+| `reminders`, `cancel reminders` | lists or clears your reminders |
+| `roll 2d6`, `uuid`, `password 20`, `ping` | small utilities |
+| anything else | an **AI task** (write, summarise, translate, plan, explain), when the operator turned AI tasks on |
+
+How it stays end-to-end encrypted: Scalvs is an ordinary FabriC++ device, not a relay feature. It has its
+own account key, device keys, signed device list and prekeys, signs in over the relay's WebSocket like the
+browser, and runs Double Ratchet with each of your devices. Your app sends to it sealed (it hands out its
+delivery key in its replies), so the relay doesn't learn who writes to it. The relay only reserves the handle
+for Scalvs's account key: nobody else can register +scalvs.veil, even while Scalvs is turned off.
+
+AI tasks leave end-to-end encryption on purpose: Scalvs decrypts the message and sends it to Anthropic's API
+(Claude Opus 5.5, low effort, with server-side fallback on a safety decline). Its `help` says so. Built-in
+tasks never leave the relay host. Scalvs keeps the last few turns of a chat in memory for context (forgotten
+after an hour idle, never written to disk) and logs only which kind of task ran.
+
+| Variable | What it does |
+|---|---|
+| `FABRIC_SCALVS=0` | Don't run Scalvs. The handle stays reserved. |
+| `FABRIC_SCALVS_STATE` | Where Scalvs keeps its keys, ratchet state and pending reminders (default: `scalvs.json` next to `FABRIC_DB`). **Secret**, like the database: whoever holds it can read what people send Scalvs. |
+| `FABRIC_SCALVS_AI_KEY` | Anthropic API key for AI tasks (falls back to `ANTHROPIC_API_KEY`). Without one, Scalvs runs built-in tasks only. |
+| `FABRIC_SCALVS_AI=0` | AI tasks off even with a key set. |
+| `FABRIC_SCALVS_MODEL` | Model for AI tasks (default `claude-opus-5-5`). |
+| `FABRIC_SCALVS_AI_DAILY` | AI tasks per account per day (default 50). |
+
+Each account gets 20 tasks per 10 minutes. `GET /api/scalvs` says whether Scalvs and AI tasks are on.
+
 ## On-device AI beyond Chrome
 
 Browsers without a built-in model (Firefox, Safari, mobile, older Chrome) run open models in a worker with
@@ -347,6 +385,9 @@ server/turn.js       short-lived TURN logins (shared-secret scheme)
 server/phone.js      FabriC++ Phone: Twilio tokens, webhooks, voicemail, SMS, burner lines
 shared/burner.js     burner number record (shared with ÆTHER), bundle sizes, rotate/burn rules
 server/models.js     model file pass-through: allowlist, disk cache, ranges
+server/scalvs.js     Scalvs: SCALVS.ai as the contact +scalvs.veil (its own device, keys and ratchet sessions)
+server/scalvs-tasks.js  Scalvs built-in tasks (calc, time, reminders, ...) and the AI hand-off
+server/scalvs-ai.js  Scalvs AI tasks through the Anthropic API
 public/idb.js        IndexedDB backend for the vault
 public/calls.js      call engine (1:1, group mesh, SFU) and call screen
 public/ai.js         on-device models: feature detection, engine choice, downloads, summaries, translation, replies, test fakes

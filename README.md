@@ -383,6 +383,12 @@ test/                node:test suites
 
 ## Roadmap (not yet built)
 
+Current status and the open question about this branch versus the Matrix build on `main` are in
+[docs/strategy.md](docs/strategy.md). Linking real phone numbers is in [docs/number-linking.md](docs/number-linking.md)
+(Phase 1 built, Phase 2 in progress).
+
+0. **Number linking, Phases 2 and 3**: seal phone history and voicemail to the account's devices; on-FabriC++ badges and opt-in contact matching.
+
 1. **Cumulus://ID beyond sign-in**: connect the real CID service (client registration, passkey sign-in on its side), keep the Cumulus backup up to date automatically, send Earn payouts to the CID's FIRM Wallet, and store backups in FIRM Vault.
 2. **Calls at scale, further**: SFU nodes in several regions (members placed by latency), node links over QUIC or SRTP instead of TCP, and VP9/AV1 SVC instead of simulcast.
 3. **On-device AI, further**: SHA-256 pinning of model files, the missing pairs (English→Korean/Turkish/Polish, Portuguese), translation on WebGPU, and a smaller assistant for phones.

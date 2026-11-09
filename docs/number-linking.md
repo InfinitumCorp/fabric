@@ -1,6 +1,16 @@
 # Linking real phone numbers to FabriC++ accounts
 
-Status: Phase 1 built 2026-11-09 (server/links.js, test/phone-links.test.js, Settings → Your phone number, + → Call a phone number). Phases 2 and 3 not built.
+Status (2026-11-09):
+
+- **Phase 1 built and tested** (`server/links.js`, `test/phone-links.test.js`, Settings → Your phone number,
+  + → Call a phone number). Runs on the dev relay with `FABRIC_NUMBER_VERIFY=dev`. Prod needs
+  `TWILIO_VERIFY_SERVICE_SID` and `FABRIC_NUMBER_PEPPER` set, then a restart.
+- **Phase 2 in progress**: `shared/sealbox.js` written (see Phase 2 below), not yet wired into the store,
+  `server/phone.js` or the client.
+- **Phase 3 not started.**
+- Decisions taken: discoverable is **off** by default with a prompt after verifying; any number that can receive
+  the code; `+1` at launch (`FABRIC_LINK_COUNTRIES`).
+- See [strategy.md](strategy.md) for how this fits with the Matrix track on `main`.
 
 ## What we want
 
@@ -77,11 +87,10 @@ phone_links(
 
 | Where | Change |
 |---|---|
-| `server/phone.js` | `number_verify_start`, `number_verify_check`, `number_unlink`, `number_lookup`, `number_discoverable`; Twilio Verify calls; limits |
+| `server/links.js` (new, built) | `number_status`, `number_verify_start`, `number_verify_check`, `number_unlink`, `number_lookup`, `number_discoverable`; Twilio Verify (or a dev verifier on localhost); E.164 checks, HMAC, limits |
 | `server/store.js` | `phone_links` table and queries; drop links on unlink, account deletion and re-verification elsewhere |
-| `server/relay.js` | route the new messages; include linked-number status in `phone_status` |
-| `shared/phone-links.js` (new) | E.164 checks, HMAC helper, rate-limit constants, shared by relay and tests |
-| `public/phone.js` | lookup on dial or text, the encrypted-or-phone choice |
+| `server/relay.js` | routes `number_*` messages to `server/links.js` |
+| `public/app.js` | lookup on dial or text, the encrypted-or-phone choice |
 | `public/app.js` + `index.html` | Settings card (verify, unlink, discoverable toggle); phone numbers in the search box |
 | `test/phone-links.test.js` (new) | verify flow with a fake Twilio Verify, limits, recycling, lookup privacy (non-discoverable reads as null) |
 
@@ -92,11 +101,15 @@ Environment: `FABRIC_NUMBER_PEPPER` (32+ random bytes), `TWILIO_VERIFY_SERVICE_S
 Today `phone_events` (calls, texts, voicemail metadata) sit in the relay store in plain text for 30 days.
 
 - When a Twilio webhook arrives, the relay builds the event as now, then **seals it to every device of the
-  account** with the existing sealed-box code (`shared/sealed.js`, the same path messages use). It stores only
-  the sealed copies and drops the plaintext.
-- Voicemail audio: fetched from Twilio, sealed the same way, then deleted from Twilio (we already keep it short).
-- `phone_log` returns sealed events and the devices open them. A device linked later gets history from another
-  device's backup, as with chats.
+  account** with `shared/sealbox.js`: the content goes under a fresh AES-256-GCM key, and that key is wrapped
+  for each device with ECDH (ephemeral key × the device's DH key from its signed device list) and HKDF. The
+  box is bound to its row with the AAD `phone|<handle>|<seq>`. The relay stores only the box and forgets the
+  content key.
+- Burner rows keep their `via` number in a plain column so burning a line can still delete its history.
+- Voicemail audio: fetched from Twilio, sealed the same way into a new `phone_audio` table, then deleted from
+  Twilio.
+- `phone_log` returns sealed events and the devices open them. A device linked later can't open older boxes
+  (they weren't sealed for it); it gets that history from another device's backup, as with chats.
 - What stays visible to the relay: the moment something arrived, and which account it was for. It needs these to
   route. Twilio still sees content in transit; this only closes our side.
 

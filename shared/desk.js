@@ -94,6 +94,7 @@ export function sharedOf(thread) {
   const out = { media: [], files: [], voice: [], links: [] };
   for (const m of [...(thread || [])].reverse()) {
     if (m.deleted || m.from === '@system') continue;
+    if (m.once) continue; // a view-once photo opens only from its message
     if (m.media?.type === 'image') out.media.push(m);
     else if (m.media?.type === 'audio') out.voice.push(m);
     else if (m.media) out.files.push(m);
@@ -176,7 +177,7 @@ function exportLine(m, me) {
 /** Export a chat. format: 'txt' | 'html' | 'json'. Media data is kept only when `media` is true. */
 export function exportChat({ name, me, thread, format = 'html', media = false, now = Date.now() }) {
   const list = (thread || []).map(({ out, anyQueued, okCopies, failedCopies, lastError, receiptSent, ...m }) => {
-    if (m.media && !media) { const { data, ...rest } = m.media; return { ...m, media: rest }; }
+    if (m.media && (!media || m.once)) { const { data, ...rest } = m.media; return { ...m, media: rest }; } // never a view-once photo
     return m;
   });
   if (format === 'json') {

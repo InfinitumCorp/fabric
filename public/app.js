@@ -33,6 +33,8 @@ import { installDesk, SAVED, plainText } from '/desk.js';
 import { installBots } from '/bots-ui.js';
 import { isBotHandle } from '/shared/bots.js';
 import { avatarOf, isNewer, needsProfile, profilePayload, AVATAR_PX } from '/shared/profile.js';
+import { waExtrasOf, dropFromBlocked, mentionsMe } from '/shared/wa.js';
+import { installWa } from '/wa.js';
 
 // ---------- local vault (keys + history stay on this device, encrypted) ----------
 // ?profile=name lets several devices/accounts run side by side in one browser for testing.
@@ -119,6 +121,7 @@ let calls = null; // voice & video calls, signaled over the same sessions
 let phone = null; // FABRIC Phone: ordinary phone numbers through the relay's carrier
 let refSeq = 0;
 let desk = null; // desktop-class features (public/desk.js), installed before boot
+let wa = null; // location, contacts, view once, mentions, stars, blocking (public/wa.js)
 let bots = null; // bot buttons, keyboards, commands and deep links (public/bots-ui.js)
 let retry = 500;
 
@@ -603,6 +606,7 @@ async function sendText(text, tr = null, extra = null, to = active) {
   if (to === SAVED) return saveNote(text, extra);
   const g = groupFor(to);
   if (isGroupKey(to) && !inGroup(g)) return;
+  if (!g && db.blocked?.[to]) { toast('Unblock this contact to message them.'); return; }
   const media = extra.media ? mediaOf({ media: extra.media }) : null;
   const wire = {
     ...(extra.reply ? { reply: extra.reply } : {}), ...(extra.fwd ? { fwd: true } : {}),
@@ -610,6 +614,8 @@ async function sendText(text, tr = null, extra = null, to = active) {
     ...(g ? { group: { id: g.id, name: g.name, members: g.members } } : {}),
     ...(extra.silent ? { silent: true } : {}),
     ...(extra.poll ? { poll: extra.poll } : {}),
+    ...(extra.loc ? { loc: extra.loc } : {}), ...(extra.card ? { card: extra.card } : {}),
+    ...(extra.once && media?.type === 'image' ? { once: true } : {}),
     ...(isTtl(prefsOf()[to]?.ttl) ? { ttl: prefsOf()[to].ttl } : {}),
   };
   if (g) await ensureContacts(g.members);
@@ -625,7 +631,8 @@ async function sendText(text, tr = null, extra = null, to = active) {
   // every device of the contact, then my own other devices (so they show what I sent)
   const targets = deviceTargets(to,
     { kind: 'text', text, ...trFields(tr), ...wire, dk: db.deliveryKey || undefined },
-    { kind: 'sync', peer: to, text, ...trFields(tr), ...wire });
+    // a view-once photo isn't copied to my other devices: they show that one went
+    wire.once ? { kind: 'sync', peer: to, text: text || 'View-once photo', ...trFields(tr), ...wire, media: undefined } : { kind: 'sync', peer: to, text, ...trFields(tr), ...wire });
   for (const t of targets) {
     try {
       const env = await sessions.encrypt(t.addr, t.payload, { id, ts });
@@ -635,7 +642,8 @@ async function sendText(text, tr = null, extra = null, to = active) {
       skipped.push(`${t.name}: ${err.message}`);
     }
   }
-  const msg = { id, from: db.handle, text, ts, status: registered ? 'sending' : 'offline', out, ...(tr ? { sentTr: tr } : {}), ...extrasOf(wire), ...(media ? { media } : {}) };
+  const msg = { id, from: db.handle, text, ts, status: registered ? 'sending' : 'offline', out, ...(tr ? { sentTr: tr } : {}), ...extrasOf(wire), ...waExtrasOf(wire), ...(media ? { media } : {}) };
+  if (msg.once) delete msg.media.data; // the sender doesn't keep a view-once photo either
   if (!out.some((e) => e.to !== db.handle)) { msg.status = 'failed: ' + (skipped[0] || 'no devices'); delete msg.out; }
   (db.threads[to] ??= []).push(msg);
   if (prefsOf()[to]?.archived && !prefsOf()[to]?.muted) delete prefsOf()[to].archived; // sending brings a chat back
@@ -678,7 +686,7 @@ function refreshAvatars() {
 
 /** Send my current photo (or its removal) to one chat, once per version. */
 async function shareProfile(key) {
-  if (PHOTO_SKIP(key) || !needsProfile(db.profile, db.profileSent, key)) return;
+  if (PHOTO_SKIP(key) || db.blocked?.[key] || !needsProfile(db.profile, db.profileSent, key)) return;
   if (isGroupKey(key) ? !inGroup(groupFor(key)) : !db.contacts[key]?.list) return;
   const v = db.profile.v;
   await sendControl(key, profilePayload(db.profile));
@@ -699,7 +707,7 @@ async function broadcastProfile() {
 }
 
 async function setMyPhoto(data) {
-  db.profile = { data, v: Date.now() };
+  db.profile = { data, v: Date.now(), ...(db.profile?.about ? { about: db.profile.about } : {}) };
   db.profileSent = {};
   await persist();
   refreshAvatars();
@@ -708,6 +716,14 @@ async function setMyPhoto(data) {
 }
 
 /** Crop a square (centre, zoomed by `zoom`, nudged by dx/dy in -1..1) and shrink it to AVATAR_PX. */
+async function setMyAbout(about) {
+  db.profile = { data: db.profile?.data || null, v: Date.now(), ...(about ? { about } : {}) };
+  db.profileSent = {};
+  await persist();
+  toast(about ? 'About updated' : 'About removed');
+  broadcastProfile();
+}
+
 async function squarePhoto(bitmap, { zoom = 1, dx = 0, dy = 0 } = {}) {
   const side = Math.min(bitmap.width, bitmap.height) / zoom;
   const sx = (bitmap.width - side) / 2 * (1 + dx);
@@ -885,6 +901,7 @@ async function processEnvelope(env) {
   }
   markSeen(env);
   if (!fromSelf && c && isDeliveryKey(payload.dk) && c.dk !== payload.dk) c.dk = payload.dk; // they accept sealed sends from us
+  if (!fromSelf && dropFromBlocked(db, env.from, payload)) return; // blocked: decrypted (keeps the session in step), then dropped
   if (payload.kind === 'call') {
     if (!fromSelf) calls?.onSignal(env, payload);
     return;
@@ -994,7 +1011,7 @@ async function processEnvelope(env) {
       peer = payload.peer;
       if (!db.contacts[peer]) await refreshContact(peer, { force: true }).catch(() => {});
     }
-    entry = { id: env.id, from: db.handle, text: String(payload.text ?? ''), ts: env.ts, status: 'sent from another device', ...extrasOf(payload) };
+    entry = { id: env.id, from: db.handle, text: String(payload.text ?? ''), ts: env.ts, status: 'sent from another device', ...extrasOf(payload), ...waExtrasOf(payload) };
     const st = sentTrOf(payload);
     if (st) entry.sentTr = st;
   } else {
@@ -1013,7 +1030,7 @@ async function processEnvelope(env) {
       }
       peer = groupKey(g.id);
     } else peer = env.from;
-    entry = { id: env.id, from: env.from, text: String(payload.text ?? ''), ts: env.ts, ...extrasOf(payload) };
+    entry = { id: env.id, from: env.from, text: String(payload.text ?? ''), ts: env.ts, ...extrasOf(payload), ...waExtrasOf(payload) };
     const st = sentTrOf(payload);
     if (st) entry.sentTr = st;
   }
@@ -1232,19 +1249,21 @@ function renderMessages() {
       quote.onclick = (e) => { e.stopPropagation(); jumpTo(m.reply.id); };
       li.append(quote);
     }
-    if (m.media) li.append(mediaEl(m));
+    if (m.media) li.append(m.once && wa ? wa.onceEl(m) : mediaEl(m));
     const translated = !mine && !m.sentTr && m.tr?.text && translating(active); // shown translated; the original opens underneath
     const flipped = m.sentTr && showOriginal.has(m.id); // a message sent translated, shown as written
     const shown = flipped ? m.sentTr.text : translated ? m.tr.text : m.text;
     if (q && shown.toLowerCase().includes(q)) { li.append(...highlighted(shown, q, 'msg-text').childNodes); li.classList.add('hit'); hits++; lastHit = li; }
+    else if (wa?.renderBody(li, m)) { /* a location or contact card */ }
     else if (m.poll && desk) desk.renderPoll(li, m);
-    else if (desk) { const t = el('span', 'msg-text'); desk.formatInto(t, shown); li.append(t); }
+    else if (desk) { const t = el('span', 'msg-text'); desk.formatInto(t, shown); wa?.markMentions(t); li.append(t); }
     else li.append(document.createTextNode(shown));
     const time = new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const ed = m.edited ? 'edited · ' : '';
     const seen = mine && m.read && userPrefs().receipts !== false;
     const meta = el('div', 'meta', mine ? `${ed}${time} · ${seen ? 'read' : m.status || ''}${m.sealed ? ' · sealed' : ''}${m.silent ? ' · no sound' : ''}` : ed + time);
     if (m.pinned) meta.prepend(el('span', 'pin-mark', 'pinned · '));
+    if (m.starred) meta.prepend(el('span', 'star-mark', '★ '));
     if (m.ttl) meta.title = `Disappears ${new Date(m.ts + m.ttl * 1000).toLocaleString()}`;
     if (mine) meta.prepend(el('span', 'ticks' + (seen ? ' read' : ''), seen || /^(delivered|queued)/.test(m.status || '') ? '✓✓ ' : /^sending|^offline/.test(m.status || '') ? '○ ' : /^failed/.test(m.status || '') ? '! ' : '✓ '));
     li.append(meta);
@@ -1696,6 +1715,7 @@ function renderThreadHead() {
   $('mute-chat').textContent = p.muted ? `Unmute notifications (${desk?.muteLabel(active) || 'muted'})` : 'Mute notifications…';
   $('mute-chat').classList.toggle('hidden', active === SAVED);
   $('archive-chat').textContent = p.archived ? 'Unarchive chat' : 'Archive chat';
+  wa?.renderThreadExtras();
   renderTyping();
 }
 
@@ -1918,6 +1938,7 @@ function renderSettings() {
   try { theme = localStorage.getItem(THEME_KEY) || 'light'; } catch { /* */ }
   $('pref-theme').value = theme;
   desk?.renderSettings();
+  wa?.renderSettings();
 }
 
 // ---------- message actions: reply, react, copy, forward, edit, delete ----------
@@ -1962,6 +1983,7 @@ function openMsgMenu(m, li) {
   const show = { reply: !m.deleted, copy: !m.deleted && Boolean(m.text), forward: !m.deleted && (Boolean(m.text) || Boolean(m.media?.data)), edit: mine && !m.deleted && Boolean(m.text) && !m.poll, 'delete-all': mine && !m.deleted, 'delete-me': true };
   for (const [k, on] of Object.entries(show)) $(`msg-${k}`).classList.toggle('hidden', !on);
   desk?.onMsgMenu(m);
+  wa?.onMsgMenu(m);
   menu.classList.remove('hidden');
   // next to the message, kept on screen
   const r = li.getBoundingClientRect();
@@ -2101,11 +2123,11 @@ async function imageMedia(file) {
   }
   throw new Error('That photo is too large to send.');
 }
-async function sendAttachment(file) {
+async function sendAttachment(file, more = {}) {
   if (!active || !file) return;
   // what goes with it is taken now: compressing a photo takes a moment, and the box may change
   const to = active;
-  const extra = {};
+  const extra = { ...more };
   if (composeCtx?.mode === 'reply') { extra.reply = composeCtx.quote; clearComposeCtx(); }
   const caption = composeCtx?.mode === 'edit' ? '' : $('text').value.trim();
   if (caption) { $('text').value = ''; growText(); desk?.clearDraft(to); }
@@ -2187,6 +2209,7 @@ function openChatMenu(key, li) {
   $('chat-archive').textContent = p.archived ? 'Unarchive' : 'Archive';
   $('chat-read').textContent = db.unread[key] ? 'Mark as read' : 'Mark as unread';
   $('chat-delete').textContent = isGroupKey(key) && inGroup(groupFor(key)) ? 'Leave and delete group' : 'Delete chat';
+  wa?.onChatMenu(key);
   const menu = $('chat-menu');
   menu.classList.remove('hidden');
   const rc = li.getBoundingClientRect();
@@ -2309,7 +2332,7 @@ function renderGroupInfo() {
 
 // ---------- notifications ----------
 function notifyIncoming(key, entry) {
-  if (prefsOf()[key]?.muted || !userPrefs().notify || !document.hidden) return;
+  if ((prefsOf()[key]?.muted && !mentionsMe(entry.text, db.handle)) || !userPrefs().notify || !document.hidden) return; // a mention gets through a mute
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   const full = isGroupKey(key) ? `${shortName(entry.from)}: ${mediaLabel(entry.media, entry.text)}` : mediaLabel(entry.media, entry.text);
   const shown = desk ? desk.notification(key, entry, full) : { title: chatName(key), body: full };
@@ -3581,6 +3604,12 @@ desk = installDesk({
   menuChat: () => menuChat, closeChatMenu, menuMsg: () => menuMsg, closeMsgMenu, renderMessages,
   sendAction: (...a) => sendAction(...a), sendControl: (...a) => sendControl(...a), systemLine,
   passphraseSet: async () => (await vault.meta())?.mode === 'passphrase', lock: lockApp,
+});
+wa = installWa({
+  $, el, toast, SAVED, db: () => db, active: () => active, persist, userPrefs, sendText: (...a) => sendText(...a),
+  sendAttachment: (...a) => sendAttachment(...a), renderMessages, renderContacts, chatKeys, chatName, isGroupKey, groupFor,
+  avatarEl, addContact, openThread, jumpTo, systemLine, growText, setMyAbout,
+  menuMsg: () => menuMsg, closeMsgMenu, menuChat: () => menuChat, closeChatMenu,
 });
 bots = installBots({
   $, el, toast, SAVED: typeof SAVED === 'undefined' ? null : SAVED, db: () => db, active: () => active, persist, isGroupKey, groupFor, addContact,

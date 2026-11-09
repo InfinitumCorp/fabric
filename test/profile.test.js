@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { avatarOf, isNewer, needsProfile, profilePayload, MAX_AVATAR_CHARS } from '../shared/profile.js';
+import { avatarOf, isNewer, needsProfile, profilePayload, cleanAbout, MAX_AVATAR_CHARS, MAX_ABOUT } from '../shared/profile.js';
 
 const JPEG = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==';
 
@@ -18,7 +18,7 @@ test('avatarOf rejects anything that is not a plain image data URL', () => {
     'data:image/jpeg;base64,abc"onerror="x',
     'javascript:alert(1)',
     `data:image/jpeg;base64,${'A'.repeat(MAX_AVATAR_CHARS)}`,
-    42, undefined, {},
+    42, {},
   ]) assert.equal(avatarOf({ v: 1, avatar }), null, String(avatar).slice(0, 40));
   for (const v of [0, -1, 1.5, 'x', undefined, Number.MAX_VALUE]) assert.equal(avatarOf({ v, avatar: JPEG }), null);
   assert.equal(avatarOf(null), null);
@@ -47,4 +47,14 @@ test('profilePayload round-trips through avatarOf', () => {
     assert.equal(p.kind, 'profile');
     assert.deepEqual(avatarOf(p), mine);
   }
+});
+
+test('about lines are one short line of text and travel with the photo', () => {
+  assert.equal(cleanAbout('  At work \n\u0007 till 6 '), 'At work till 6');
+  assert.equal([...cleanAbout('é'.repeat(500))].length, MAX_ABOUT);
+  assert.equal(cleanAbout(42), '');
+  assert.deepEqual(avatarOf({ v: 3, avatar: null, about: 'Available' }), { data: null, v: 3, about: 'Available' });
+  assert.deepEqual(avatarOf({ v: 3, about: 'Busy' }), { data: null, v: 3, about: 'Busy' });
+  const mine = { data: JPEG, v: 9, about: 'Hi' };
+  assert.deepEqual(avatarOf(profilePayload(mine)), mine);
 });

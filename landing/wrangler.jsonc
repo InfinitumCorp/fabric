@@ -1,0 +1,12 @@
+{
+  // FABRIC public landing page on infinitumfabric.app: static assets only, no Worker code.
+  // Deploy: cd landing && npx wrangler deploy
+  "name": "fabric-site",
+  "compatibility_date": "2026-11-01",
+  "assets": { "directory": "./public", "not_found_handling": "404-page" },
+  "routes": [
+    { "pattern": "infinitumfabric.app", "custom_domain": true },
+    { "pattern": "www.infinitumfabric.app", "custom_domain": true }
+  ],
+  "observability": { "enabled": true }
+}

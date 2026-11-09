@@ -4,6 +4,7 @@ app/node_modules/
 .expo/
 server/data/
 server/pgdata/
+app/data/
 .gradle/
 **/build/
 local.properties

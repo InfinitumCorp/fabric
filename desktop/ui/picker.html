@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'self'">
+<title>Share your screen</title>
+<style>
+  html, body { margin: 0; background: #ffffff; color: #111820; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  header { padding: 18px 20px 12px; border-bottom: 1px solid #e3e6e9; }
+  h1 { margin: 0; font-size: 15px; font-weight: 400; }
+  p { margin: 4px 0 0; font-size: 12px; color: #52606b; }
+  .eyebrow { font-family: ui-monospace, Consolas, monospace; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: #52606b; margin: 16px 20px 8px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; padding: 0 20px; }
+  button.src { all: unset; box-sizing: border-box; cursor: pointer; border: 1px solid #e3e6e9; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+  button.src:hover { border-color: #111820; }
+  button.src:focus-visible, button.src.on { border-color: #2454dd; outline: 1px solid #2454dd; }
+  button.src img { width: 100%; aspect-ratio: 16 / 10; object-fit: contain; background: #f4f5f6; }
+  button.src span { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  footer { position: sticky; bottom: 0; background: #ffffff; border-top: 1px solid #e3e6e9; padding: 12px 20px; margin-top: 18px; display: flex; justify-content: flex-end; gap: 8px; }
+  footer button { border-radius: 0; padding: 9px 16px; font: inherit; font-size: 13px; cursor: pointer; border: 1px solid #111820; }
+  .ghost { background: #ffffff; color: #111820; }
+  .primary { background: #111820; color: #ffffff; }
+  .primary:disabled { opacity: .4; cursor: default; }
+</style>
+</head>
+<body>
+  <header><h1>Share your screen</h1><p>Choose a screen or window. Only this call will see it, end-to-end encrypted.</p></header>
+  <div class="eyebrow">Screens</div><div class="grid" id="screens"></div>
+  <div class="eyebrow">Windows</div><div class="grid" id="windows"></div>
+  <footer><button class="ghost" id="cancel" type="button">Cancel</button><button class="primary" id="share" type="button" disabled>Share</button></footer>
+  <script src="picker.js"></script>
+</body>
+</html>

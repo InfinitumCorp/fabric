@@ -288,6 +288,28 @@ WebAssembly can use several threads. Try it in Chrome with the built-in models h
 | `FABRIC_MODEL_SOURCE` | Where model files come from (default `https://huggingface.co`; any mirror with the same `/<org>/<repo>/resolve/main/<file>` layout). |
 | `FABRIC_MODEL_DIR` | Cache folder (default `data/models`). Files placed here by hand are served without asking the source. |
 
+## Desktop app (Windows, macOS)
+
+`desktop/` is FabriC++ for the desktop: a thin Electron shell around the web client the relay serves, the same way `android/` wraps it in a WebView. Crypto, the vault and calls all run in the page exactly as in a browser. The shell adds:
+
+- **One origin.** Release builds load only `https://relay.infinitumfabric.app/`, and nothing can repoint them: command-line arguments, environment variables, a second launch and the page itself are all ignored. The relay serves the app's code, so this matters. Any link to another origin opens in the system browser. Pop-ups, `<webview>` and navigation away from the relay are blocked.
+- **Calls.** Camera, microphone, notifications and screen capture are granted only to the relay's own page. Every other permission, plus USB, HID and serial devices, is refused. macOS asks the OS once per device and shows its own screen picker (macOS 15+). Windows has no OS picker an app can call, so a small FabriC++ picker lists screens and windows, and nothing is shared until you pick one.
+- **Desktop behavior.** Single instance (launching it again focuses the window). Closing the window hides it to the tray so messages and calls keep arriving, and Quit is in the tray menu. The window title is always "FabriC++™". Unread chats show as a square accent marker on the tray icon and taskbar (Windows) or a dock badge (macOS). Message notifications go through the OS.
+- **Branding.** The F from `public/brand/`, copied at build time by `desktop/tools/icons.js` (no separate artwork). While the relay's page loads, a boot screen shows the F and wordmark centered on white, matching the web `#boot` screen. If the relay can't be reached, it offers a retry.
+
+Build (Node 22+, no admin rights needed; Electron and the NSIS tooling are downloaded on first build):
+
+```
+cd desktop
+npm install
+npm run dist        # release: dist/FabriC++-Setup-<version>.exe (per-user installer) and dist/FabriC++-<version>-portable.exe
+npm run dist:dev    # dev build that loads http://localhost:8795/ instead (output in dist-dev/)
+npm run dev         # run from source against http://localhost:8795/
+npm run smoke       # end-to-end check against a local relay on :8795 (sign-in, message, voice call, origin lock)
+```
+
+On a Mac, `npm run dist` produces a `.dmg` and `.zip`, with camera and microphone usage strings in Info.plist. Builds are unsigned for now: Windows SmartScreen and macOS Gatekeeper will warn until a code-signing certificate is configured (`CSC_LINK` / `CSC_KEY_PASSWORD` for electron-builder). Dev builds keep their own profile ("FabriC++ Dev"), so they never share a vault with the release app.
+
 ## Running a relay
 
 State lives in SQLite (`data/fabric.db`, Node's built-in `node:sqlite`, so Node 22.5+). On first start an

@@ -134,3 +134,58 @@ test('silent flag travels with a message', () => {
   assert.equal(extrasOf({ silent: true }).silent, true);
   assert.equal(extrasOf({ silent: 'yes' }).silent, undefined);
 });
+
+// ---------- tier 2: pinned messages, polls, disappearing messages ----------
+import { applyAction, actionPayload, pollOf, pollFallback, pollSummary, expireThread, isTtl, ttlLabel } from '../shared/actions.js';
+
+test('pin: anyone in the chat pins and unpins; deleted messages cannot be pinned', () => {
+  const t = [{ id: 'msg00001', from: '@a.veil', text: 'x', ts: 1 }];
+  assert.ok(applyAction(t, '@b.veil', actionPayload('pin', 'msg00001', { on: true }), 50));
+  assert.equal(t[0].pinned, 50);
+  assert.ok(applyAction(t, '@a.veil', actionPayload('pin', 'msg00001', { on: false })));
+  assert.equal(t[0].pinned, undefined);
+  assert.equal(applyAction(t, '@a.veil', { kind: 'action', act: 'pin', target: 'msg00001', on: 'yes' }), null);
+  applyAction(t, '@a.veil', actionPayload('delete', 'msg00001'));
+  assert.equal(applyAction(t, '@b.veil', actionPayload('pin', 'msg00001', { on: true })), null);
+});
+
+test('polls: checked on arrival, one ballot each, author closes', () => {
+  assert.equal(pollOf({ poll: { q: 'Lunch?', options: ['a'] } }), null);
+  assert.equal(pollOf({ poll: { q: 'Lunch?', options: ['a', 'a'] } }), null);
+  assert.equal(pollOf({ poll: { q: ' ', options: ['a', 'b'] } }), null);
+  const poll = pollOf({ poll: { q: 'Lunch?', options: ['Noodles', 'Salad', 'Soup'], multi: 'no' } });
+  assert.deepEqual(poll, { q: 'Lunch?', options: ['Noodles', 'Salad', 'Soup'] });
+  assert.match(pollFallback(poll), /📊 Lunch\?\n1\. Noodles\n2\. Salad\n3\. Soup/);
+  assert.equal(extrasOf({ poll: { q: 'Q', options: ['x', 'y'], multi: true } }).poll.multi, true);
+  const t = [{ id: 'poll0001', from: '@a.veil', text: pollFallback(poll), ts: 1, poll }];
+  const vote = (who, choices) => applyAction(t, who, actionPayload('vote', 'poll0001', { choices }));
+  assert.ok(vote('@b.veil', [1]));
+  assert.ok(vote('@c.veil', [1]));
+  assert.ok(vote('@a.veil', [0]));
+  assert.equal(vote('@b.veil', [0, 1]), null); // single choice
+  assert.equal(vote('@b.veil', [7]), null);
+  assert.ok(vote('@c.veil', [2])); // changed their mind
+  assert.deepEqual(pollSummary(t[0], '@c.veil'), { counts: [1, 1, 1], voters: 3, mine: [2], closed: false });
+  assert.ok(vote('@c.veil', [])); // took it back
+  assert.equal(pollSummary(t[0], '@c.veil').voters, 2);
+  assert.equal(applyAction(t, '@b.veil', actionPayload('close', 'poll0001')), null); // not the author
+  assert.ok(applyAction(t, '@a.veil', actionPayload('close', 'poll0001'), 99));
+  assert.equal(vote('@d.veil', [0]), null); // closed
+  assert.equal(pollSummary(t[0], '@a.veil').closed, true);
+  const multi = [{ id: 'poll0002', from: '@a.veil', text: '', ts: 1, poll: { q: 'Q', options: ['x', 'y'], multi: true } }];
+  assert.ok(applyAction(multi, '@b.veil', actionPayload('vote', 'poll0002', { choices: [1, 0, 1] })));
+  assert.deepEqual(multi[0].votes['@b.veil'], [0, 1]);
+});
+
+test('disappearing messages: only the listed timers, removed when due', () => {
+  assert.equal(isTtl(3600), true);
+  assert.equal(isTtl(5), false);
+  assert.equal(extrasOf({ ttl: 86400 }).ttl, 86400);
+  assert.equal(extrasOf({ ttl: 12 }).ttl, undefined);
+  assert.equal(ttlLabel(604800), '1 week');
+  const t = [
+    { id: 'a', ts: 0, ttl: 3600 }, { id: 'b', ts: 0 }, { id: 'c', ts: 3000e3, ttl: 3600 }, { id: 'd', from: '@system', ts: 0 },
+  ];
+  assert.equal(expireThread(t, 3600e3), 1);
+  assert.deepEqual(t.map((m) => m.id), ['b', 'c', 'd']);
+});

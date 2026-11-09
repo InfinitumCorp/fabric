@@ -387,7 +387,7 @@ npm run smoke       # end-to-end check against a local relay on :8795 (sign-in, 
 
 ## Desktop-class features (all apps)
 
-FabriC++'s answer to what the big desktop messengers offer, checked feature by feature in [docs/desktop-parity.md](docs/desktop-parity.md). Built in `public/desk.js` (page) and `shared/desk.js` (tested logic), so the web client, the desktop app and the Android app all get them. None changes the encrypted protocol except one optional flag (`silent`) that older clients ignore.
+FabriC++'s answer to what the big desktop messengers offer, checked feature by feature in [docs/desktop-parity.md](docs/desktop-parity.md). Built in `public/desk.js` (page) and `shared/desk.js` (tested logic), so the web client, the desktop app and the Android app all get them. The encrypted protocol gains only optional fields and actions that older clients ignore: `silent`, `poll`, `ttl`, the `pin`, `vote` and `close` actions, and a `chat_ttl` control message.
 
 - **Chat folders.** All, Unread, Personal and Groups over the chat list, plus up to 10 of your own (by kind of chat and by chosen chats, optionally leaving muted ones out). `Ctrl+1…9` switches.
 - **Saved messages.** Notes to yourself (`Ctrl+0`, the bookmark in the sidebar, or forward anything into it). Kept on this device, in backups and in the history copied to a linked device.
@@ -396,6 +396,9 @@ FabriC++'s answer to what the big desktop messengers offer, checked feature by f
 - **Formatting and links.** `**bold**`, `__italic__`, `~~strike~~`, `` `code` ``, ```` ```blocks``` ````, `||hidden until tapped||`, and clickable http(s) links that open outside the app. Built as DOM, never HTML.
 - **Media.** A photo viewer with previous/next, zoom, save and "Show in chat"; per chat, a Shared media and files sheet (photos, files, voice, links); several files at once by drag-and-drop anywhere on the chat or by paste.
 - **Navigation.** Jump to date (`Ctrl+J`), previous/next chat (`Alt+↑/↓`), edit your last message (`↑` in an empty box), and the full list on `Ctrl+/`.
+- **Pinned messages.** Pin any message for everyone in the chat (right-click › Pin); a bar over the chat shows the latest pin and steps through the others.
+- **Polls.** New poll in the chat menu: a question, 2–10 options, one answer or several. Votes travel encrypted and everyone in the chat can see them; results show once you've voted, and the author can stop the poll. Older apps see the poll as text.
+- **Disappearing messages.** Per chat, from 1 hour to 1 month, set for both sides. Every FabriC++ device removes a message when its time is up; older apps keep them, and the app says so.
 - **Export a chat** to a web page, plain text or JSON, decrypted on this device (photos and files optional).
 - **Notifications.** Mute a chat for 1 hour, 8 hours, a day, a week or always; a chime on or off; previews with the name and message, the name only, or nothing.
 - **Appearance.** Text size, chat background (plain, hairline grid, dot grid, diagonal rule), compact list, alongside the light/dark theme.

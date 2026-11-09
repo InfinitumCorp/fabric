@@ -9,6 +9,7 @@ import {
   exportChat, exportFileName, SHORTCUTS, shortcutFor, shortcutLabel, AUTOLOCK_CHOICES, lockDue,
   MAX_ACCOUNTS, noteAccount,
 } from '/shared/desk.js';
+import { pollFallback, pollSummary, expireThread, TTL_CHOICES, ttlLabel, MAX_POLL_OPTIONS, MAX_POLL_Q, MAX_POLL_OPTION } from '/shared/actions.js';
 
 export { SAVED, plainText };
 
@@ -325,13 +326,157 @@ export function installDesk(api) {
   schedBar.id = 'sched-bar';
   schedBar.onclick = openScheduledList;
   $('composer').before(schedBar);
+  // and the disappearing-messages note
+  const ttlNote = el('button', 'sched-bar ttl-note hidden');
+  ttlNote.type = 'button';
+  ttlNote.id = 'ttl-note';
+  ttlNote.onclick = () => openTtl();
+  $('composer').before(ttlNote);
   function renderThreadExtras() {
+    sweepExpired();
     const n = (db().scheduled || []).filter((s) => s.to === active()).length;
     schedBar.classList.toggle('hidden', !n);
     schedBar.textContent = n ? `${n} scheduled message${n > 1 ? 's' : ''} · show` : '';
+    const ttl = prefs()[active()]?.ttl || 0;
+    ttlNote.classList.toggle('hidden', !ttl);
+    ttlNote.textContent = ttl ? `New messages disappear after ${ttlLabel(ttl)} · change` : '';
     const saved = active() === SAVED;
     for (const id of ['translate-toggle', 'show-safety']) $(id)?.classList.toggle('hidden', saved || (id === 'show-safety' && api.isGroupKey(active())));
+    for (const id of ['poll-btn', 'ttl-btn']) $(id)?.classList.toggle('hidden', saved);
+    if ($('ttl-btn')) $('ttl-btn').textContent = `Disappearing messages: ${ttlLabel(ttl)}`;
+    renderPinBar();
   }
+
+  // ---------- pinned messages ----------
+  const pinBar = el('button', 'pin-bar hidden');
+  pinBar.type = 'button';
+  pinBar.id = 'pin-bar';
+  $('messages').before(pinBar);
+  let pinIdx = 0;
+  const pinnedIn = (key) => (db().threads[key] || []).filter((m) => m.pinned && !m.deleted).sort((a, b) => b.pinned - a.pinned);
+  function renderPinBar() {
+    const list = pinnedIn(active());
+    pinBar.classList.toggle('hidden', !list.length);
+    if (!list.length) { pinIdx = 0; return; }
+    pinIdx %= list.length;
+    const m = list[pinIdx];
+    pinBar.replaceChildren(
+      el('span', 'eyebrow', list.length > 1 ? `Pinned ${pinIdx + 1} of ${list.length}` : 'Pinned'),
+      el('span', 'pin-text', m.poll ? `📊 ${m.poll.q}` : plainText(m.text) || (m.media ? 'Photo or file' : '')),
+    );
+    pinBar.title = list.length > 1 ? 'Show in chat; click again for the next pinned message' : 'Show in chat';
+  }
+  pinBar.onclick = () => {
+    const list = pinnedIn(active());
+    if (!list.length) return;
+    api.jumpTo(list[pinIdx % list.length].id);
+    pinIdx = (pinIdx + 1) % list.length;
+    renderPinBar();
+  };
+  const pinItem = button('Pin', '', () => {
+    const m = api.menuMsg(); api.closeMsgMenu();
+    if (m && active()) { api.sendAction(active(), 'pin', m.id, { on: !m.pinned }); toast(m.pinned ? 'Unpinned' : 'Pinned for everyone in the chat'); }
+  });
+  pinItem.id = 'msg-pin';
+  pinItem.setAttribute('role', 'menuitem');
+  const closeItem = button('Stop poll', '', () => {
+    const m = api.menuMsg(); api.closeMsgMenu();
+    if (m && active() && confirm('Stop this poll? Nobody can vote after that.')) api.sendAction(active(), 'close', m.id);
+  });
+  closeItem.id = 'msg-close-poll';
+  closeItem.setAttribute('role', 'menuitem');
+  $('msg-copy').before(pinItem, closeItem);
+  function onMsgMenu(m) {
+    pinItem.textContent = m.pinned ? 'Unpin' : 'Pin';
+    pinItem.classList.toggle('hidden', Boolean(m.deleted));
+    closeItem.classList.toggle('hidden', !(m.poll && !m.pollClosed && m.from === db().handle && !m.deleted));
+  }
+
+  // ---------- polls ----------
+  function renderPoll(li, m) {
+    const s = pollSummary(m, db().handle);
+    const showResults = s.closed || s.mine.length > 0;
+    const box = el('div', 'poll');
+    box.append(el('div', 'poll-q', m.poll.q),
+      el('div', 'poll-kind', `${s.closed ? 'Poll ended' : m.poll.multi ? 'Poll · choose any' : 'Poll · choose one'} · votes are seen by the chat`));
+    m.poll.options.forEach((o, i) => {
+      const b = el('button', 'poll-opt' + (s.mine.includes(i) ? ' mine' : ''));
+      b.type = 'button';
+      b.disabled = s.closed;
+      const pct = s.voters ? Math.round((s.counts[i] / s.voters) * 100) : 0;
+      if (showResults) b.style.setProperty('--pct', `${pct}%`);
+      b.append(el('span', 'poll-mark', s.mine.includes(i) ? '■' : '□'), el('span', 'poll-label', o));
+      if (showResults) b.append(el('span', 'poll-pct', `${pct}% · ${s.counts[i]}`));
+      b.onclick = (e) => {
+        e.stopPropagation();
+        let next;
+        if (m.poll.multi) next = s.mine.includes(i) ? s.mine.filter((x) => x !== i) : [...s.mine, i];
+        else next = s.mine.includes(i) ? [] : [i];
+        api.sendAction(active(), 'vote', m.id, { choices: next });
+      };
+      box.append(b);
+    });
+    box.append(el('div', 'poll-foot', `${s.voters} vote${s.voters === 1 ? '' : 's'}${!showResults ? ' · vote to see results' : ''}`));
+    li.append(box);
+  }
+
+  function openPoll() {
+    const to = active();
+    if (!to || to === SAVED) return;
+    const d = dialog('New poll');
+    const q = el('input', 'text-input'); q.maxLength = MAX_POLL_Q; q.placeholder = 'Ask something';
+    const qRow = el('label', 'field'); qRow.append(el('span', '', 'Question'), q);
+    const opts = el('div', 'poll-edit');
+    const addOpt = (v = '') => {
+      if (opts.children.length >= MAX_POLL_OPTIONS) return;
+      const i = el('input', 'text-input'); i.maxLength = MAX_POLL_OPTION; i.value = v; i.placeholder = `Option ${opts.children.length + 1}`;
+      i.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addOpt(); opts.lastChild.focus(); } });
+      opts.append(i);
+      more.disabled = opts.children.length >= MAX_POLL_OPTIONS;
+    };
+    const more = button('Add option', 'ghost', () => { addOpt(); opts.lastChild.focus(); });
+    addOpt(); addOpt();
+    const multi = check('Allow more than one answer');
+    const err = el('p', 'error small');
+    d.append(qRow, el('div', 'eyebrow', 'Options'), opts, more, multi.label,
+      el('p', 'muted small', 'Votes travel end-to-end encrypted to everyone in the chat, who can see who voted for what. Older FabriC++ apps show the poll as text.'),
+      err, actions(button('Cancel', 'ghost', () => d.close()), button('Send poll', 'primary', () => {
+        const options = [...opts.querySelectorAll('input')].map((i) => i.value.trim()).filter(Boolean);
+        const poll = { q: q.value.trim(), options, ...(multi.input.checked ? { multi: true } : {}) };
+        if (!poll.q) { err.textContent = 'Write a question.'; return; }
+        if (options.length < 2) { err.textContent = 'Give at least two options.'; return; }
+        if (new Set(options).size !== options.length) { err.textContent = 'Each option must be different.'; return; }
+        d.close();
+        api.sendText(pollFallback(poll), null, { poll }, to);
+      })));
+    d.showModal();
+    q.focus();
+  }
+
+  // ---------- disappearing messages ----------
+  async function openTtl() {
+    const key = active();
+    if (!key || key === SAVED) return;
+    const now = prefs()[key]?.ttl || 0;
+    const c = await choose('Disappearing messages', TTL_CHOICES.map((s) => ({ label: `${ttlLabel(s)}${s === now ? ' (now)' : ''}`, s })));
+    if (!c || c.s === now) return;
+    const p = (prefs()[key] ??= {});
+    if (c.s) p.ttl = c.s; else delete p.ttl;
+    api.systemLine(key, c.s ? `You set messages to disappear after ${ttlLabel(c.s)}` : 'You turned off disappearing messages');
+    await api.persist();
+    api.renderMessages(); renderThreadExtras();
+    api.sendControl(key, { kind: 'chat_ttl', ttl: c.s }).catch(() => {});
+    toast(c.s ? `New messages disappear after ${ttlLabel(c.s)}. Older FabriC++ apps keep them.` : 'Disappearing messages off');
+  }
+  function sweepExpired() {
+    if (!db().handle) return;
+    let gone = 0;
+    for (const t of Object.values(db().threads || {})) gone += expireThread(t);
+    if (!gone) return;
+    api.persist(); api.renderContacts();
+    if (active()) api.renderMessages();
+  }
+  setInterval(sweepExpired, 30e3);
 
   // ---------- thread menu: shared media, jump to date, export ----------
   const menu = $('thread-menu');
@@ -344,6 +489,8 @@ export function installDesk(api) {
   addItem('shared-btn', 'Shared media and files', () => openShared());
   addItem('date-btn', 'Jump to date', () => openDate());
   addItem('export-btn', 'Export chat', () => openExport());
+  addItem('poll-btn', 'New poll', () => openPoll());
+  addItem('ttl-btn', 'Disappearing messages: Off', () => openTtl());
 
   function openDate() {
     const key = active();
@@ -783,6 +930,6 @@ export function installDesk(api) {
 
   return {
     renderFolders, matches, draftOf, saveDraft, restoreDraft, clearDraft, formatInto, openViewer, notification,
-    renderThreadExtras, renderSettings, onSignedIn, sendFiles, muteLabel: (k) => muteLabel(prefs()[k]), sweepMutes,
+    renderThreadExtras, renderSettings, onSignedIn, sendFiles, renderPoll, onMsgMenu, renderPinBar, muteLabel: (k) => muteLabel(prefs()[k]), sweepMutes,
   };
 }

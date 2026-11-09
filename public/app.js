@@ -22,7 +22,7 @@ import { createPhone, toE164, formatNumber } from '/phone.js';
 import { mountDialpad, isTouch } from '/dialpad.js';
 import { mountSpaces } from '/spaces.js';
 import { seal, peekSealed, openSealed, isDeliveryKey } from '/shared/sealed.js';
-import { applyAction, actionPayload, quoteOf, extrasOf, reactionSummary, QUICK_REACTIONS } from '/shared/actions.js';
+import { applyAction, actionPayload, quoteOf, extrasOf, reactionSummary, QUICK_REACTIONS, isTtl, ttlLabel } from '/shared/actions.js';
 import {
   mediaOf, mediaLabel, fmtBytes, fmtDuration, MAX_MEDIA_BYTES, receiptPayload, applyReceipt, unreadFrom,
   freshTyping, TYPING_SEND_EVERY, TYPING_SHOW_FOR, groupOf, newGroup, mergeGroup, groupKey, isGroupKey, groupIdOf,
@@ -606,6 +606,8 @@ async function sendText(text, tr = null, extra = null, to = active) {
     ...(media ? { media: { type: media.type, mime: media.mime, name: media.name, data: media.data, ...(media.w ? { w: media.w, h: media.h } : {}), ...(media.dur ? { dur: media.dur } : {}) } } : {}),
     ...(g ? { group: { id: g.id, name: g.name, members: g.members } } : {}),
     ...(extra.silent ? { silent: true } : {}),
+    ...(extra.poll ? { poll: extra.poll } : {}),
+    ...(isTtl(prefsOf()[to]?.ttl) ? { ttl: prefsOf()[to].ttl } : {}),
   };
   if (g) await ensureContacts(g.members);
   else {
@@ -846,6 +848,18 @@ async function processEnvelope(env) {
     persist(); renderContacts();
     if (k === active) { renderMessages(); renderThreadHead(); }
     ensureContacts(next.members).then(() => persist());
+    return;
+  }
+  if (payload.kind === 'chat_ttl') {
+    const k = keyOf();
+    const ttl = payload.ttl === 0 || isTtl(payload.ttl) ? payload.ttl : null;
+    if (!k || ttl === null) return;
+    const p = (prefsOf()[k] ??= {});
+    if ((p.ttl || 0) === ttl) return;
+    if (ttl) p.ttl = ttl; else delete p.ttl;
+    systemLine(k, `${fromSelf ? 'You' : env.from} ${ttl ? `set messages to disappear after ${ttlLabel(ttl)}` : 'turned off disappearing messages'}`);
+    persist(); renderContacts();
+    if (k === active) { renderMessages(); desk?.renderThreadExtras(); }
     return;
   }
   if (payload.kind === 'bot_answer') { if (!fromSelf) bots?.onAnswer(env.from, payload); return; }
@@ -1105,12 +1119,15 @@ function renderMessages() {
     const flipped = m.sentTr && showOriginal.has(m.id); // a message sent translated, shown as written
     const shown = flipped ? m.sentTr.text : translated ? m.tr.text : m.text;
     if (q && shown.toLowerCase().includes(q)) { li.append(...highlighted(shown, q, 'msg-text').childNodes); li.classList.add('hit'); hits++; lastHit = li; }
+    else if (m.poll && desk) desk.renderPoll(li, m);
     else if (desk) { const t = el('span', 'msg-text'); desk.formatInto(t, shown); li.append(t); }
     else li.append(document.createTextNode(shown));
     const time = new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const ed = m.edited ? 'edited · ' : '';
     const seen = mine && m.read && userPrefs().receipts !== false;
     const meta = el('div', 'meta', mine ? `${ed}${time} · ${seen ? 'read' : m.status || ''}${m.sealed ? ' · sealed' : ''}${m.silent ? ' · no sound' : ''}` : ed + time);
+    if (m.pinned) meta.prepend(el('span', 'pin-mark', 'pinned · '));
+    if (m.ttl) meta.title = `Disappears ${new Date(m.ts + m.ttl * 1000).toLocaleString()}`;
     if (mine) meta.prepend(el('span', 'ticks' + (seen ? ' read' : ''), seen || /^(delivered|queued)/.test(m.status || '') ? '✓✓ ' : /^sending|^offline/.test(m.status || '') ? '○ ' : /^failed/.test(m.status || '') ? '! ' : '✓ '));
     li.append(meta);
     if (m.sentTr) {
@@ -1154,6 +1171,7 @@ function renderMessages() {
   renderTranslateToggle();
   renderTranslateOut();
   suggestReplies();
+  desk?.renderPinBar();
 }
 
 // ---------- on-device AI: translating what I send ----------
@@ -1735,8 +1753,9 @@ function openMsgMenu(m, li) {
     react.append(b);
   }
   react.classList.toggle('hidden', Boolean(m.deleted));
-  const show = { reply: !m.deleted, copy: !m.deleted && Boolean(m.text), forward: !m.deleted && (Boolean(m.text) || Boolean(m.media?.data)), edit: mine && !m.deleted && Boolean(m.text), 'delete-all': mine && !m.deleted, 'delete-me': true };
+  const show = { reply: !m.deleted, copy: !m.deleted && Boolean(m.text), forward: !m.deleted && (Boolean(m.text) || Boolean(m.media?.data)), edit: mine && !m.deleted && Boolean(m.text) && !m.poll, 'delete-all': mine && !m.deleted, 'delete-me': true };
   for (const [k, on] of Object.entries(show)) $(`msg-${k}`).classList.toggle('hidden', !on);
+  desk?.onMsgMenu(m);
   menu.classList.remove('hidden');
   // next to the message, kept on screen
   const r = li.getBoundingClientRect();
@@ -3307,7 +3326,8 @@ desk = installDesk({
   sendText: (...a) => sendText(...a), composeMode: () => composeCtx?.mode || null,
   replyExtra: () => { if (composeCtx?.mode !== 'reply') return {}; const r = { reply: composeCtx.quote }; clearComposeCtx(); return r; },
   startEdit: (m) => { setComposeCtx({ mode: 'edit', id: m.id, original: m.text }); $('text').value = m.text; growText(); $('text').focus(); },
-  menuChat: () => menuChat, closeChatMenu,
+  menuChat: () => menuChat, closeChatMenu, menuMsg: () => menuMsg, closeMsgMenu, renderMessages,
+  sendAction: (...a) => sendAction(...a), sendControl: (...a) => sendControl(...a), systemLine,
   passphraseSet: async () => (await vault.meta())?.mode === 'passphrase', lock: lockApp,
 });
 bots = installBots({

@@ -53,8 +53,8 @@ test('unknown targets, system lines and unknown acts are ignored', () => {
   const t = thread();
   assert.equal(applyAction(t, A, actionPayload('react', 'msgZZZZZZZZZZZZ9', { emoji: '👍' })), null);
   assert.equal(applyAction(t, '@system', { kind: 'action', act: 'delete', target: 'sys-1' }), null);
-  assert.equal(applyAction(t, A, { kind: 'action', act: 'pin', target: 'msgAAAAAAAAAAAA1' }), null);
-  assert.throws(() => actionPayload('pin', 'msgAAAAAAAAAAAA1'));
+  assert.equal(applyAction(t, A, { kind: 'action', act: 'burn', target: 'msgAAAAAAAAAAAA1' }), null);
+  assert.throws(() => actionPayload('burn', 'msgAAAAAAAAAAAA1'));
   assert.throws(() => actionPayload('edit', 'x'));
 });
 

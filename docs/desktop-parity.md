@@ -39,9 +39,9 @@ Status, as of 2026-11-09 on `feat/relay-pq`:
 | Send without sound | **Built** | Send-button menu → Send silently; the other side gets no alert |
 | Message formatting (bold, italic, code, strike, hidden text) | **Built** | `**bold**`, `__italic__`, `` `code` ``, ```` ``` ```` blocks, `~~strike~~`, `\|\|hidden\|\|` |
 | Clickable links | **Built** | http(s) links open outside the app |
-| Pin a message inside a chat | Tier 2 | Needs a `pin` action all devices understand |
-| Polls and quizzes | Tier 2 | Needs a poll message type and vote actions |
-| Auto-delete timer | Tier 2 | Needs a timer field honoured by every device |
+| Pin a message inside a chat | Built (Tier 2) | `pin` action; anyone in the chat pins for everyone; pin bar cycles through pins |
+| Polls | Built (Tier 2) | `poll` field on a text message, `vote` and `close` actions; one or many answers; quizzes not built |
+| Auto-delete timer | Built (Tier 2) | `ttl` on each message, `chat_ttl` to set it for the chat; 1 hour to 1 month |
 | Link previews | Tier 3 | A preview fetched by the sender's device would leak what you open to that site; needs design |
 | Stickers, GIFs, custom emoji | Tier 3 | Only with original FabriC++ art; GIF search would leak queries to a third party |
 | Topics in large groups, channels | Other session | Channels are being built elsewhere |
@@ -120,7 +120,21 @@ Client (`public/desk.js`, `shared/desk.js`, hooks in `public/app.js`), desktop
 (`desktop/main.js`, `desktop/ui/app-preload.js`). Tested by `test/desk.test.js` (helpers) and
 `desktop/test/smoke.js` (end to end in the desktop app with a second device in Edge).
 
+## Tier 2 (built)
+
+Pinned messages, polls and the auto-delete timer. Each is one new action or field inside the
+end-to-end encryption, so the relay learns nothing new:
+
+- `{kind:'action', act:'pin', target, on}` — anyone in the chat pins or unpins, for everyone.
+- A text message with `poll: {q, options[2..10], multi?}`; `act:'vote'` with `choices` (one
+  ballot per person, `[]` takes it back) and `act:'close'` (author only). The message text is a
+  plain-text version of the poll, which is what older clients show.
+- `ttl` (seconds) on each message and `{kind:'chat_ttl', ttl}` to set the chat's timer on every
+  side. Each device removes the message when its time is up. Older clients keep such messages, and
+  the app says so when you turn the timer on.
+
+Tested by `test/actions.test.js` / `test/desk.test.js` and checked end to end with two accounts.
+
 ## Next, if wanted
 
-Tier 2 in this order: pinned messages, polls, auto-delete timer. Each needs one new payload or
-action that older clients ignore, plus tests in `test/actions.test.js`.
+Quizzes (a poll with a right answer), and Tier 3 items above.

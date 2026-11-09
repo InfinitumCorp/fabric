@@ -35,6 +35,7 @@ import { isBotHandle } from '/shared/bots.js';
 import { avatarOf, isNewer, needsProfile, profilePayload, AVATAR_PX } from '/shared/profile.js';
 import { waExtrasOf, dropFromBlocked, mentionsMe } from '/shared/wa.js';
 import { installWa } from '/wa.js';
+import { installStatus } from '/status.js';
 
 // ---------- local vault (keys + history stay on this device, encrypted) ----------
 // ?profile=name lets several devices/accounts run side by side in one browser for testing.
@@ -122,6 +123,7 @@ let phone = null; // FABRIC Phone: ordinary phone numbers through the relay's ca
 let refSeq = 0;
 let desk = null; // desktop-class features (public/desk.js), installed before boot
 let wa = null; // location, contacts, view once, mentions, stars, blocking (public/wa.js)
+let statusUi = null; // status updates, broadcast lists, locked chats (public/status.js)
 let bots = null; // bot buttons, keyboards, commands and deep links (public/bots-ui.js)
 let retry = 500;
 
@@ -911,6 +913,7 @@ async function processEnvelope(env) {
     return;
   }
   if (payload.kind === 'profile') { onProfile(payload, fromSelf ? null : c); return; }
+  if (payload.kind === 'status' || payload.kind === 'status_seen') { statusUi?.onPayload(payload, fromSelf ? null : env.from, env.ts); return; }
   // which chat a control payload belongs to: a group I'm in (by gid), else the contact
   const keyOf = () => {
     if (payload.gid !== undefined) {
@@ -1081,11 +1084,12 @@ function renderContacts() {
   const ul = $('contacts');
   ul.replaceChildren();
   const q = searchQuery();
-  const everything = chatKeys();
+  const everything = statusUi ? statusUi.filterChats(chatKeys()) : chatKeys();
   desk?.renderFolders(everything.filter((k) => !prefsOf()[k]?.archived));
   const all = everything.filter((k) => (!q || chatName(k).toLowerCase().includes(q) || k.toLowerCase().includes(q)) && (q || showArchived || !desk || desk.matches(k)));
   const archivedCount = orderChats(all, prefsOf(), lastTs, { archived: true }).length;
   const handles = orderChats(all, prefsOf(), lastTs, { archived: showArchived });
+  statusUi?.renderTop(ul, { searching: Boolean(q), archived: showArchived });
   if (showArchived || archivedCount) {
     const row = el('li', 'archived-row');
     row.append(el('span', '', showArchived ? '← Back to chats' : `Archived · ${archivedCount}`));
@@ -1136,6 +1140,7 @@ function renderSearchHits(q) {
   const hits = [];
   if (q.length >= 2) {
     for (const [h, list] of Object.entries(db.threads)) {
+      if (statusUi?.isLocked(h)) continue; // a locked chat's messages stay hidden until it's opened with the code
       for (const m of list) if (m.from !== '@system' && m.text?.toLowerCase().includes(q)) hits.push({ h, m });
     }
   }
@@ -1666,6 +1671,7 @@ function renderPqBadge() {
 }
 
 async function openThread(h) {
+  if (statusUi && active !== h && !(await statusUi.mayOpen(h))) return;
   closeOutPreview(); // a translation preview belongs to the chat it was made in
   if (active !== h) { desk?.saveDraft(active); if (composeCtx) clearComposeCtx(); desk?.restoreDraft(h); }
   active = h;
@@ -2213,6 +2219,7 @@ function openChatMenu(key, li) {
   $('chat-read').textContent = db.unread[key] ? 'Mark as read' : 'Mark as unread';
   $('chat-delete').textContent = isGroupKey(key) && inGroup(groupFor(key)) ? 'Leave and delete group' : 'Delete chat';
   wa?.onChatMenu(key);
+  statusUi?.onChatMenu(key);
   const menu = $('chat-menu');
   menu.classList.remove('hidden');
   const rc = li.getBoundingClientRect();
@@ -2338,7 +2345,8 @@ function notifyIncoming(key, entry) {
   if ((prefsOf()[key]?.muted && !mentionsMe(entry.text, db.handle)) || !userPrefs().notify || !document.hidden) return; // a mention gets through a mute
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   const full = isGroupKey(key) ? `${shortName(entry.from)}: ${mediaLabel(entry.media, entry.text)}` : mediaLabel(entry.media, entry.text);
-  const shown = desk ? desk.notification(key, entry, full) : { title: chatName(key), body: full };
+  const shown = statusUi?.isLockedAny(key) ? { title: 'FabriC++', body: 'New message' } // a locked chat doesn't show who or what
+    : desk ? desk.notification(key, entry, full) : { title: chatName(key), body: full };
   if (!shown) return;
   try {
     const n = new Notification(shown.title, { body: shown.body, tag: key, silent: Boolean(desk) });
@@ -3613,6 +3621,12 @@ wa = installWa({
   sendAttachment: (...a) => sendAttachment(...a), renderMessages, renderContacts, chatKeys, chatName, isGroupKey, groupFor,
   avatarEl, addContact, openThread, jumpTo, systemLine, growText, setMyAbout,
   menuMsg: () => menuMsg, closeMsgMenu, menuChat: () => menuChat, closeChatMenu,
+});
+statusUi = installStatus({
+  $, el, toast, SAVED, db: () => db, active: () => active, persist, userPrefs, prefsOf, setChatPref, chatKeys, chatName, isGroupKey, lastTs,
+  isBotHandle, avatarEl, imageMedia, openThread, closeThread, renderContacts, growText,
+  sendText: (...a) => sendText(...a), sendControl: (...a) => sendControl(...a),
+  menuChat: () => menuChat, closeChatMenu,
 });
 bots = installBots({
   $, el, toast, SAVED: typeof SAVED === 'undefined' ? null : SAVED, db: () => db, active: () => active, persist, isGroupKey, groupFor, addContact,

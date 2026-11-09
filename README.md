@@ -170,6 +170,12 @@ and missed calls go to voicemail. It runs through a Twilio account owned by the 
 can hear calls and read texts, and the relay keeps phone history and texts for 30 days so every device sees them.
 The Phone tab says this up front. FABRIC-to-FABRIC chats and calls are unaffected.
 
+**Calling with your own SIM (Android app).** Without Twilio, the Android app can still hand a number to the phone's
+own dialer: dial a number, then **Call with your SIM**. The app uses Android's `ACTION_DIAL`, so the system dialer
+opens with the number filled in and you press Call there; the app holds no call permission and a page can never
+place a call by itself. The call is an ordinary carrier call (billed by your carrier, not end-to-end encrypted, not
+in FabriC++ call history). Browsers and tablets without a SIM don't show the button.
+
 Toll-fraud guards: only allowed calling codes, no US premium-rate numbers (900/976), outgoing calls capped at
 30 an hour and texts at 60 an hour per account, a 4-hour call limit, and caller ID is always the account's own number
 or one of its own burners.

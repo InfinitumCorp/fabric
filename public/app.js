@@ -2350,6 +2350,10 @@ $('num-form').onsubmit = async (e) => {
   try { h = await lookupNumber(n); } catch (err) { out.replaceChildren(el('p', 'error small', err.message)); return; }
   out.replaceChildren();
   const btn = (label, cls, fn) => { const b = el('button', cls, label); b.type = 'button'; b.onclick = () => { $('num-dialog').close(); fn(); }; return b; };
+  const sim = canSimCall();
+  const simRow = (cls) => { const r = el('div', 'num-actions'); r.append(simBtn(cls)); return r; };
+  const simBtn = (cls) => btn('Call with your SIM', cls, () => { if (!simCall(n)) toast('Could not open the phone dialer.'); });
+  const simNote = () => el('p', 'muted small', 'Opens your phone’s dialer. Not end-to-end encrypted: your carrier handles the call and bills it as a normal call.');
   if (h) {
     out.append(el('p', 'num-found', `${formatNumber(n)} is ${h} on FabriC++.`));
     const row = el('div', 'num-actions');
@@ -2359,16 +2363,27 @@ $('num-form').onsubmit = async (e) => {
       btn('FabText', 'ghost', () => addContact(h).catch((err) => toast(err.message))),
     );
     out.append(row, el('p', 'muted small', 'End-to-end encrypted: this never touches the phone network.'));
+    if (sim) out.append(simRow('ghost'), simNote());
     return;
   }
   out.append(el('p', 'small', `No one on FabriC++ is findable at ${formatNumber(n)}.`));
+  if (sim) out.append(simRow('primary'), simNote());
   if (phone?.status?.enabled) {
     out.append(btn('Call over the phone network', 'ghost', () => { switchTab('phone'); phone.dial(n); }),
-      el('p', 'muted small', 'Not end-to-end encrypted: the carrier handles the call.'));
-  } else {
-    out.append(el('p', 'muted small', 'Calls to regular phones are not set up on this relay.'));
+      el('p', 'muted small', 'Through FabriC++ Phone. Not end-to-end encrypted: the carrier handles the call.'));
+  } else if (!sim) {
+    out.append(el('p', 'muted small', 'Calls to regular phones are not set up on this relay. In the Android app you can call with your SIM.'));
   }
 };
+
+// The Android app can hand a number to the phone's own dialer (ACTION_DIAL: the person presses Call
+// there, so a page can never place a call by itself). Browsers and tablets without a SIM get nothing.
+function canSimCall() {
+  try { return Boolean(window.FabricShell?.canCarrierCall?.()); } catch { return false; }
+}
+function simCall(e164) {
+  try { return Boolean(window.FabricShell?.carrierCall?.(String(e164).replace(/[^0-9+*#]/g, ''))); } catch { return false; }
+}
 
 // ---------- thread menu and in-chat search ----------
 let threadQuery = '';

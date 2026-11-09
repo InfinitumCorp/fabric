@@ -215,6 +215,30 @@ public class MainActivity extends Activity {
         public void setDarkBars(boolean dark) {
             runOnUiThread(() -> applyBars(dark));
         }
+
+        /** Whether this device can place calls over its own SIM (phones yes, most tablets no). */
+        @JavascriptInterface
+        public boolean canCarrierCall() {
+            PackageManager pm = getPackageManager();
+            // FEATURE_TELEPHONY_CALLING exists from Android 13; older devices only report FEATURE_TELEPHONY
+            return android.os.Build.VERSION.SDK_INT >= 33
+                ? pm.hasSystemFeature(PackageManager.FEATURE_TELEPHONY_CALLING)
+                : pm.hasSystemFeature(PackageManager.FEATURE_TELEPHONY);
+        }
+
+        /**
+         * Hand a number to the phone's own dialer, over the carrier. ACTION_DIAL only fills the number
+         * in: the person presses Call in Android's dialer, so the app holds no call permission and a
+         * page can never place a call by itself.
+         */
+        @JavascriptInterface
+        public boolean carrierCall(String number) {
+            if (number == null || !number.matches("\\+?[0-9*#]{3,20}")) return false;
+            runOnUiThread(() -> {
+                try { startActivity(new Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", number, null))); } catch (Exception ignored) { }
+            });
+            return true;
+        }
     }
 
     @Override

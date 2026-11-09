@@ -7,6 +7,7 @@
 
 import { TOPICS, REACTIONS, can, channelHandle, showHandle } from '/shared/spaces.js';
 import { TIERS, compareRows } from '/shared/tiers.js';
+import { cacheGet, cachePut } from '/shared/translate.js';
 
 const subtle = globalThis.crypto.subtle;
 const enc = new TextEncoder();
@@ -42,7 +43,7 @@ const SVG = {
   eye: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
 };
 
-export function mountSpaces({ request, wsSend, toast, switchTab, me, vault, sendKey }) {
+export function mountSpaces({ request, wsSend, toast, switchTab, me, vault, sendKey, translation: tl = null }) {
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   const btn = (cls, text, onclick, title) => { const b = el('button', cls, text); b.type = 'button'; if (onclick) b.onclick = onclick; if (title) { b.title = title; b.setAttribute('aria-label', title); } return b; };
@@ -76,9 +77,11 @@ export function mountSpaces({ request, wsSend, toast, switchTab, me, vault, send
         <header class="thread-head sp-head">
           <button type="button" class="icon-btn back" id="sp-close" aria-label="Back to channels and groups">${SVG.back}</button>
           <div class="peer-box"><div class="peer" id="sp-title"></div><div class="peer-sub muted small" id="sp-sub"></div></div>
+          <button type="button" class="ghost small sp-tr-btn hidden" id="sp-tr-btn" aria-pressed="false">Translate</button>
           <button type="button" class="icon-btn" id="sp-info-btn" title="Info" aria-label="Info">${SVG.info}</button>
         </header>
         <div class="sp-privacy" id="sp-privacy"></div>
+        <div class="ai-needs sp-tr-needs hidden" id="sp-tr-needs"></div>
         <ol class="sp-posts" id="sp-posts"></ol>
         <form class="composer sp-composer" id="sp-composer">
           <textarea id="sp-text" rows="1" maxlength="4096" placeholder="Post" aria-label="Post"></textarea>
@@ -242,7 +245,11 @@ export function mountSpaces({ request, wsSend, toast, switchTab, me, vault, send
     head.append(el('span', 'sp-time', ` · ${fmtTime(p.at)}`));
     li.append(head);
     if (p.plain) {
-      if (p.plain.t) li.append(el('div', 'sp-text', p.plain.t));
+      if (p.plain.t) {
+        const tr = translatedPost(p);
+        li.append(el('div', 'sp-text', tr ? tr.text : p.plain.t));
+        if (tr) li.append(tl.noteEl(tr, p.plain.t, `p:${p.sid}:${p.seq}`, () => redrawPost(p)));
+      }
       if (p.plain.img && /^image\/(png|jpeg|gif|webp)$/.test(p.plain.img.mime)) {
         const img = el('img', 'sp-img'); img.alt = 'Photo'; img.src = `data:${p.plain.img.mime};base64,${p.plain.img.data}`;
         li.append(img);
@@ -269,6 +276,85 @@ export function mountSpaces({ request, wsSend, toast, switchTab, me, vault, send
     return li;
   }
 
+  // ---------- automatic translation of posts (on this device; text never leaves it) ----------
+  const trCache = () => (vault.get().spaceTr ??= {});
+  const trKey = (p) => `${p.sid}:${p.seq}`;
+  const trQueue = [];
+  let trRunning = false;
+  let trNeeds = null; // { sid, from }: a model to download first
+  let trAsk = null;   // { sid, from }: the one-time question
+  /** The cached translation to show for a post, or null (and queue it if not looked at yet). */
+  function translatedPost(p) {
+    if (!tl || !p.plain?.t?.trim() || p.author === me() || !tl.on(p.sid)) return null;
+    const c = cacheGet(trCache(), trKey(p), p.plain.t);
+    if (c) return c.from ? c : null;
+    if (!trQueue.includes(p)) trQueue.push(p);
+    runQueue();
+    return null;
+  }
+  async function runQueue(opts = {}) {
+    if (trRunning && !opts.allowDownload) return;
+    trRunning = true;
+    try {
+      while (trQueue.length) {
+        const p = trQueue.shift();
+        if (p.sid !== openSid || !tl.on(p.sid)) continue;
+        const text = p.plain?.t;
+        if (!text || cacheGet(trCache(), trKey(p), text)) continue;
+        let r;
+        try { r = await tl.translate(text, opts); } catch (e) { console.warn('on-device translation failed', e); continue; }
+        if (r?.needsDownload) {
+          if (!trNeeds) { trNeeds = { sid: p.sid, from: r.from }; renderTrBar(); }
+          continue;
+        }
+        cachePut(trCache(), trKey(p), text, r ? { from: r.from, text: String(r.text).slice(0, 8000) } : { from: null, text: null });
+        vault.save();
+        if (r && tl.shouldAsk() && !trAsk) { trAsk = { sid: p.sid, from: r.from }; renderTrBar(); }
+        if (r) redrawPost(p);
+      }
+    } finally { trRunning = false; }
+  }
+  function redrawPost(p) {
+    const li = $('sp-posts').querySelector(`li.sp-post[data-seq="${p.seq}"]`);
+    if (li && p.sid === openSid) li.replaceWith(postEl(p));
+  }
+  function renderTrBar() {
+    const box = $('sp-tr-needs');
+    const b = $('sp-tr-btn');
+    const s = cur();
+    b.classList.toggle('hidden', !tl || !s);
+    if (!tl || !s) return box.classList.add('hidden');
+    const on = tl.on(s.id);
+    b.setAttribute('aria-pressed', String(on));
+    b.textContent = on ? 'Translating' : 'Translate';
+    b.title = on ? 'Turn off automatic translation here' : 'Translate posts here, on this device';
+    if (trAsk && trAsk.sid === s.id) {
+      box.replaceChildren(el('span', '', `Translated from ${tl.name(trAsk.from)} into ${tl.name(tl.target())} on this device. Posts never leave it for translation. Keep translating automatically?`),
+        btn('ghost', 'Keep translating', () => { tl.answer(true); trAsk = null; renderTrBar(); }),
+        btn('ghost', 'Turn off', () => { tl.answer(false); trAsk = null; renderTrBar(); renderPosts(); }));
+      box.classList.remove('hidden');
+    } else if (trNeeds && trNeeds.sid === s.id && on) {
+      const mb = tl.mb(trNeeds.from);
+      const dl = btn('ghost', 'Download', async () => {
+        dl.disabled = true;
+        trNeeds = null;
+        trQueue.splice(0, trQueue.length, ...posts.filter((x) => x.sid === openSid));
+        try { await runQueue({ allowDownload: true, onProgress: (x) => { dl.textContent = `Downloading… ${Math.round(x * 100)}%`; } }); } catch (e) { toast(e.message); }
+        renderTrBar();
+      });
+      box.replaceChildren(el('span', '', `Translating ${tl.name(trNeeds.from)} needs a one-time download of the on-device translation model${mb ? ` (about ${mb} MB)` : ''}. It runs on this device; posts are never sent anywhere to be translated.`),
+        dl, btn('ghost', 'Not now', () => { trNeeds = null; renderTrBar(); }));
+      box.classList.remove('hidden');
+    } else box.classList.add('hidden');
+  }
+  $('sp-tr-btn').onclick = () => {
+    const s = cur();
+    if (!s || !tl) return;
+    tl.toggle(s.id);
+    if (trAsk) { tl.answer(true); trAsk = null; } // they've made a choice
+    renderTrBar(); renderPosts();
+  };
+
   function adEl(ad, onHide) {
     const li = el('li', 'sp-ad');
     const head = el('div', 'sp-ad-head');
@@ -291,6 +377,7 @@ export function mountSpaces({ request, wsSend, toast, switchTab, me, vault, send
   }
 
   function renderPosts() {
+    renderTrBar();
     const ol = $('sp-posts');
     ol.replaceChildren();
     if (!posts.length) ol.append(el('li', 'muted small sp-loading', cur()?.kind === 'channel' ? 'No posts yet.' : 'No messages yet. Say hello.'));
@@ -662,6 +749,7 @@ export function mountSpaces({ request, wsSend, toast, switchTab, me, vault, send
 
   return {
     connected, onRelay, onKey, chatListAd, show, openCreate,
+    retranslate() { if (openSid) renderPosts(); },
     onShow(name) { if (name === 'spaces') refresh(); if (name === 'plus') { renderPlus(); request({ type: 'plus_status' }).then((p) => { plan = p; renderPlus(); }).catch(() => {}); } },
   };
 }

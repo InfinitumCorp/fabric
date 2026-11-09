@@ -16,6 +16,7 @@ import { idbBackend } from '/idb.js';
 import { PURPOSES } from '/shared/economy.js';
 import { createAi, installFakeModels, hideBuiltInModels } from '/ai.js';
 import { languageName } from '/shared/ai.js';
+import { normalizePrefs, translatingIn, toggleChat, setAuto, shouldAsk, noteFor, stillCurrent, theirLanguage, offerReplyIn, textHash } from '/shared/translate.js';
 import { TRANSLATION_LANGS } from '/shared/models.js';
 import { createCalls } from '/calls.js';
 import { createPhone, toE164, formatNumber } from '/phone.js';
@@ -63,9 +64,9 @@ const QS_AI = new URLSearchParams(location.search);
 if (QS_AI.get('media') === 'test' && QS_AI.get('ai') === 'fake') installFakeModels();
 if (QS_AI.get('media') === 'test' && QS_AI.get('ai') === 'open') hideBuiltInModels();
 const ai = createAi();
-const aiPrefs = () => { db.ai ??= { replies: true, translateAll: false, translate: {} }; db.ai.out ??= {}; return db.ai; };
+const aiPrefs = () => { db.ai ??= { replies: true }; return normalizePrefs(db.ai); };
 const LANG_RE = /^[a-z]{2,3}$/;
-const translating = (peer) => Boolean(aiPrefs().translateAll || aiPrefs().translate[peer]);
+const translating = (peer) => translatingIn(aiPrefs(), peer);
 const SEEN_MAX = 3000; // envelope keys already processed; the relay redelivers until we ack
 const seenKey = (env) => `${env.from}#${env.fromDevice}:${env.id}`;
 function markSeen(env) {
@@ -1115,7 +1116,7 @@ function renderMessages() {
       li.append(quote);
     }
     if (m.media) li.append(mediaEl(m));
-    const translated = !mine && m.tr?.text && !showOriginal.has(m.id);
+    const translated = !mine && !m.sentTr && m.tr?.text && translating(active); // shown translated; the original opens underneath
     const flipped = m.sentTr && showOriginal.has(m.id); // a message sent translated, shown as written
     const shown = flipped ? m.sentTr.text : translated ? m.tr.text : m.text;
     if (q && shown.toLowerCase().includes(q)) { li.append(...highlighted(shown, q, 'msg-text').childNodes); li.classList.add('hit'); hits++; lastHit = li; }
@@ -1141,13 +1142,8 @@ function renderMessages() {
       b.onclick = () => { if (showOriginal.has(m.id)) showOriginal.delete(m.id); else showOriginal.add(m.id); renderMessages(); };
       note.append(b);
       li.append(note);
-    } else if (!mine && m.tr?.text) {
-      const note = el('div', 'tr-note', translated ? `Translated on device from ${languageName(m.tr.from)} · ` : 'Original · ');
-      const b = el('button', 'link', translated ? 'show original' : 'show translation');
-      b.type = 'button';
-      b.onclick = () => { if (showOriginal.has(m.id)) showOriginal.delete(m.id); else showOriginal.add(m.id); renderMessages(); };
-      note.append(b);
-      li.append(note);
+    } else if (translated) {
+      li.append(trNoteEl(m.tr, m.text, `m:${m.id}`));
     }
     const groups = reactionSummary(m, db.handle);
     if (groups.length) {
@@ -1179,7 +1175,7 @@ function renderMessages() {
 function renderTranslateOut() {
   const sel = $('translate-out');
   if (!active) return;
-  const theirs = (db.threads[active] || []).filter((m) => m.from === active).map((m) => m.tr?.from || m.sentTr?.from).filter(Boolean).at(-1);
+  const theirs = theirLanguage(db.threads[active], db.handle, ai.target); // groups too
   const langs = [...new Set([...(theirs && TRANSLATION_LANGS.includes(theirs) ? [theirs] : []), ...TRANSLATION_LANGS])].filter((l) => l !== ai.target || l === aiPrefs().out[active]);
   const want = aiPrefs().out[active] || '';
   const key = `${active}|${langs.join(',')}|${want}`;
@@ -1253,68 +1249,150 @@ async function previewOut(peer, text, to, { allowDownload = false } = {}) {
 // ---------- on-device AI: translation and suggested replies ----------
 const showOriginal = new Set(); // message ids shown untranslated (this session only)
 let aiNeeds = null; // { peer, from }: a translation model to download first
+let aiAsk = null; // { peer, from }: the one-time "keep translating automatically?" question
 let replyState = { key: null, list: [] };
+
+const openOriginals = new Set(); // "m:<id>" / "p:<sid>:<seq>": originals shown under translations (this session only)
+
+/**
+ * "Translated from Spanish · Show original", and the original underneath once opened.
+ * Used for chat messages and for posts in channels and large groups.
+ */
+function trNoteEl(tr, original, key, rerender = renderMessages) {
+  const open = openOriginals.has(key);
+  const n = noteFor(tr, { open, name: (c) => languageName(c) });
+  const wrap = el('div', 'tr-wrap');
+  const note = el('div', 'tr-note', `${n.label} · `);
+  const b = el('button', 'link tr-toggle', n.action);
+  b.type = 'button';
+  b.setAttribute('aria-expanded', String(open));
+  b.onclick = (e) => { e.stopPropagation(); if (open) openOriginals.delete(key); else openOriginals.add(key); rerender(); };
+  note.append(b);
+  wrap.append(note);
+  if (open) {
+    const o = el('div', 'tr-original', original);
+    o.lang = tr.from;
+    wrap.append(o);
+  }
+  return wrap;
+}
 
 function renderTranslateToggle() {
   const b = $('translate-toggle');
   const on = active && translating(active);
   b.setAttribute('aria-pressed', String(Boolean(on)));
   b.textContent = on ? 'Translating' : 'Translate';
-  b.title = aiPrefs().translateAll ? 'Every chat is translated (Security → On-device AI)' : 'Translate incoming messages on this device';
+  b.title = on ? 'Turn off automatic translation in this chat' : 'Translate incoming messages in this chat, on this device';
   const box = $('ai-needs');
-  if (aiNeeds && aiNeeds.peer === active) {
-    box.replaceChildren(el('span', '', `Translating ${languageName(aiNeeds.from)} needs a one-time download of the on-device translation model.`));
+  if (aiAsk && aiAsk.peer === active) {
+    // asked once: the first time something is actually translated
+    box.replaceChildren(el('span', '', `Translated from ${languageName(aiAsk.from)} into ${languageName(ai.target)} on this device. Messages never leave it for translation. Keep translating automatically?`));
+    const keep = el('button', 'ghost', 'Keep translating');
+    keep.type = 'button';
+    keep.onclick = () => { setAuto(aiPrefs(), true); aiAsk = null; persist(); renderTranslateToggle(); };
+    const off = el('button', 'ghost', 'Turn off');
+    off.type = 'button';
+    off.onclick = () => { setAuto(aiPrefs(), false); aiAsk = null; persist(); renderMessages(); spacesUi?.retranslate?.(); };
+    box.append(keep, off);
+    box.classList.remove('hidden');
+  } else if (aiNeeds && aiNeeds.peer === active) {
+    box.replaceChildren(el('span', '', `Translating ${languageName(aiNeeds.from)} needs a one-time download of the on-device translation model${aiNeeds.mb ? ` (about ${aiNeeds.mb} MB)` : ''}. It runs on this device; your messages are never sent anywhere to be translated.`));
     const btn = el('button', 'ghost', 'Download');
     btn.type = 'button';
     btn.onclick = () => downloadTranslator(aiNeeds.peer, aiNeeds.from, btn);
-    box.append(btn);
+    const no = el('button', 'ghost', 'Not now');
+    no.type = 'button';
+    no.onclick = () => { aiNeeds = null; renderTranslateToggle(); };
+    box.append(btn, no);
     box.classList.remove('hidden');
   } else box.classList.add('hidden');
+  renderReplyOffer();
 }
 
-/** Translate one incoming message. Saved with the message, in the encrypted vault. */
+/** The first translation on a new install asks, once, whether to keep translating automatically. */
+function noteTranslated(peer, from) {
+  if (!shouldAsk(aiPrefs()) || aiAsk) return;
+  aiAsk = { peer, from };
+  if (peer === active) renderTranslateToggle();
+}
+
+/**
+ * Translate one incoming message (chat, group chat, bot reply, edit) on this device. The result
+ * is saved with the message, in the encrypted vault. Text that is already in my language is
+ * marked, so it isn't detected again.
+ */
 async function translateEntry(peer, m, { allowDownload = false, onProgress } = {}) {
-  if (m.tr || m.sentTr || m.from === db.handle || !m.text?.trim()) return;
+  if (m.tr || m.sentTr || m.from === db.handle || m.from === '@system' || m.deleted || !m.text?.trim()) return;
+  const text = m.text;
+  if (m.trSkip === textHash(text) && !allowDownload) return;
   try {
-    const r = await ai.translate(m.text, { allowDownload, onProgress });
-    if (!r) return;
-    if (r.needsDownload) { aiNeeds = { peer, from: r.from }; if (peer === active) renderTranslateToggle(); return; }
+    const r = await ai.translate(text, { allowDownload, onProgress });
+    if (!stillCurrent(m, text) || m.tr) return; // edited or deleted while the model ran
+    if (!r) { m.trSkip = textHash(text); persist(); return; }
+    if (r.needsDownload) { aiNeeds = { peer, from: r.from, mb: ai.translationMb?.(r.from) }; if (peer === active) renderTranslateToggle(); return; }
+    delete m.trSkip;
     m.tr = { from: r.from, text: String(r.text).slice(0, 8000) };
     persist();
+    noteTranslated(peer, r.from);
     if (peer === active) renderMessages();
   } catch (e) {
     console.warn('on-device translation failed', e);
   }
 }
 
-async function translateRecent(peer, opts) {
-  for (const m of (db.threads[peer] || []).filter((x) => x.from !== db.handle && x.from !== '@system').slice(-30)) {
-    if (!translating(peer)) return;
-    await translateEntry(peer, m, opts);
-  }
+const trBusy = new Set();
+async function translateRecent(peer, opts = {}) {
+  if (trBusy.has(peer) && !opts.allowDownload) return;
+  trBusy.add(peer);
+  try {
+    for (const m of (db.threads[peer] || []).filter((x) => x.from !== db.handle && x.from !== '@system').slice(-30)) {
+      if (!translating(peer)) return;
+      await translateEntry(peer, m, opts);
+    }
+  } finally { trBusy.delete(peer); }
 }
 
 async function downloadTranslator(peer, from, btn) {
   btn.disabled = true;
   const progress = (p) => { btn.textContent = `Downloading… ${Math.round(p * 100)}%`; };
-  aiNeeds = null;
-  await translateRecent(peer, { allowDownload: true, onProgress: progress });
+  try {
+    await translateRecent(peer, { allowDownload: true, onProgress: progress });
+    aiNeeds = null;
+  } catch (e) { toast(`Download failed: ${e.message}`); }
   renderTranslateToggle();
 }
 
 $('translate-toggle').onclick = () => {
   if (!active) return;
-  const p = aiPrefs();
-  if (p.translateAll) return; // controlled in Security → On-device AI
-  p.translate[active] = !p.translate[active];
-  if (!p.translate[active]) delete p.translate[active];
+  const on = toggleChat(aiPrefs(), active);
+  if (aiAsk) { if (aiPrefs().auto === undefined) aiPrefs().auto = true; aiAsk = null; } // they've chosen
   persist();
+  closeThreadMenu();
   renderMessages();
-  if (translating(active)) {
+  if (on) {
     translateRecent(active);
     wsSend({ type: 'feature', feature: 'translate' }); // counted only if Product research is opted in
   }
 };
+
+/** In a translated chat: offer, once, to send replies in the other person's language. */
+function renderReplyOffer() {
+  let box = $('tr-offer');
+  const theirs = active && theirLanguage(db.threads[active], db.handle, ai.target);
+  const lang = active && offerReplyIn(aiPrefs(), active, theirs, { languages: TRANSLATION_LANGS });
+  if (!lang) { box?.remove(); return; }
+  if (!box) { box = el('div', 'tr-offer'); box.id = 'tr-offer'; $('out-preview').before(box); }
+  if (box.dataset.key === `${active}|${lang}`) return;
+  box.dataset.key = `${active}|${lang}`;
+  box.replaceChildren(el('span', '', `They write in ${languageName(lang)}. Reply in ${languageName(lang)}? You check each translation before it's sent.`));
+  const yes = el('button', 'ghost', `Reply in ${languageName(lang)}`);
+  yes.type = 'button';
+  yes.onclick = () => { aiPrefs().out[active] = lang; persist(); box.remove(); $('translate-out').dataset.key = ''; renderTranslateOut(); };
+  const no = el('button', 'ghost', 'No thanks');
+  no.type = 'button';
+  no.onclick = () => { aiPrefs().noOffer[active] = true; persist(); box.remove(); };
+  box.append(yes, no);
+}
 
 /** Up to three replies under the composer when the last message is theirs. Never sent by themselves. */
 function suggestReplies() {
@@ -1380,12 +1458,18 @@ async function renderAiStatus() {
   tb.replaceChildren();
   for (const [k, v] of rows) { const tr = el('tr'); tr.append(el('th', '', k), el('td', '', v)); tb.append(tr); }
   $('ai-replies').checked = aiPrefs().replies;
-  $('ai-translate-all').checked = aiPrefs().translateAll;
+  $('ai-translate-all').checked = aiPrefs().auto !== false;
   $('ai-download').classList.toggle('hidden', ![st.summarizer, st.detector, st.replies].some((x) => x.state === 'downloadable' || x.state === 'downloading'));
 }
 
 $('ai-replies').onchange = (e) => { aiPrefs().replies = e.target.checked; replyState = { key: null, list: [] }; persist(); };
-$('ai-translate-all').onchange = (e) => { aiPrefs().translateAll = e.target.checked; persist(); };
+$('ai-translate-all').onchange = (e) => {
+  setAuto(aiPrefs(), e.target.checked);
+  aiAsk = null;
+  persist();
+  spacesUi?.retranslate?.();
+  if (active) { renderMessages(); if (translating(active)) translateRecent(active); }
+};
 $('ai-download').onclick = async () => {
   const btn = $('ai-download');
   const msg = $('ai-msg');
@@ -1461,6 +1545,7 @@ async function openThread(h) {
   renderContacts(); renderMessages(); renderKeyWarning(); renderPqBadge();
   desk?.renderThreadExtras();
   sendReceipts(h);
+  if (translating(h)) translateRecent(h); // anything not yet looked at, e.g. from before a model was downloaded
   if (h === SAVED) { if (!matchMedia('(pointer: coarse)').matches) $('text').focus(); return; }
   if (isGroupKey(h)) { ensureContacts(groupFor(h)?.members || []); return; }
   if (db.contacts[h]?.viaGroup) { delete db.contacts[h].viaGroup; persist(); }
@@ -3203,6 +3288,18 @@ $('new-action').onclick = openNewSheet;
 spacesUi = mountSpaces({
   request, wsSend, toast, switchTab, me: () => db.handle,
   vault: { get: () => db, save: () => persist() },
+  // automatic translation of posts, on this device (the same models and switches as chats)
+  translation: {
+    on: (sid) => translating(`space:${sid}`),
+    toggle: (sid) => { const on = toggleChat(aiPrefs(), `space:${sid}`); persist(); return on; },
+    translate: (text, opts) => ai.translate(text, opts),
+    noteEl: (tr, original, key, rerender) => trNoteEl(tr, original, key, rerender),
+    shouldAsk: () => shouldAsk(aiPrefs()),
+    answer: (keep) => { setAuto(aiPrefs(), keep); aiAsk = null; persist(); if (active) renderMessages(); },
+    mb: (from) => ai.translationMb(from),
+    name: (c) => languageName(c),
+    target: () => ai.target,
+  },
   // a space key goes over the one-to-one encrypted session; to myself = my other devices only
   sendKey: async (h, payload) => {
     if (h !== db.handle) await ensureContacts([h]);

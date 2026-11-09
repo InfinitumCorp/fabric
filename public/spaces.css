@@ -88,3 +88,9 @@ p.sp-privacy { border: 1px solid var(--line); margin: 8px 0; }
 .contacts .sp-ad-head .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sp-dialog select { padding: 8px; border: 1px solid var(--line); border-radius: 0; background: var(--panel); color: var(--text); }
 .sp-dialog .ghost.danger { background: var(--panel); color: var(--err); border: 1px solid var(--err); }
+
+/* automatic translation of posts (on this device) */
+.sp-tr-btn { margin-left: auto; }
+.sp-tr-btn[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); border-color: var(--line-strong); }
+.sp-tr-needs { margin: 8px 16px; }
+.sp-post .tr-wrap { margin-top: 8px; }

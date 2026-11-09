@@ -258,7 +258,14 @@ export function createAi({ target = baseLang(navigator.language) } = {}) {
     ], 120));
   }
 
-  return { target, status, download, summarize, translate, translateOut, translatorState, languageOf, replies };
+  /** About how many MB the open models for from→target are (null with the browser's own model). */
+  function translationMb(from, to = target) {
+    if (g.Translator) return null;
+    const route = translationRoute(from, to);
+    return route?.length ? route.length * TRANSLATION_SIZE_MB : null;
+  }
+
+  return { target, status, download, summarize, translate, translateOut, translatorState, translationMb, languageOf, replies };
 }
 
 /**

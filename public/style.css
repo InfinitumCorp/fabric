@@ -236,6 +236,15 @@ canvas.qr { display: block; width: 232px; height: 232px; margin: 10px 0; image-r
 /* on-device AI: translations, suggested replies */
 .msg .tr-note { font-family: var(--mono); font-size: 10px; letter-spacing: .04em; color: var(--faint); margin-top: 4px; }
 .msg .tr-note .link { color: inherit; font-size: inherit; }
+/* "Translated from X · Show original": a hairline, then the original underneath when opened */
+.tr-wrap { margin-top: 6px; padding-top: 5px; border-top: 1px solid var(--line); border-radius: 0; }
+.tr-wrap .tr-note { margin-top: 0; color: var(--muted); }
+.tr-wrap .tr-toggle { color: var(--text); text-decoration-color: var(--line); }
+.tr-wrap .tr-toggle:hover, .tr-wrap .tr-toggle:focus-visible { color: var(--accent); text-decoration-color: currentColor; }
+.tr-wrap .tr-toggle:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.tr-original { margin-top: 5px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 0; background: var(--panel); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; font-size: .95em; }
+.msg.mine .tr-wrap { border-top-color: currentColor; }
+.tr-offer { margin: 0 24px 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 0; background: var(--panel); font-size: 13px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .replies { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 24px 0; border-top: 1px solid var(--line); }
 .replies .eyebrow { width: 100%; color: var(--muted); }
 .reply-chip { background: var(--panel); border: 1px solid var(--line); border-radius: 0; padding: 7px 12px; font-size: 13px; cursor: pointer; max-width: 100%; text-align: left; }
@@ -249,7 +258,7 @@ canvas.qr { display: block; width: 232px; height: 232px; margin: 10px 0; image-r
 .out-preview .row { display: flex; gap: 8px; flex-wrap: wrap; }
 #translate-toggle[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); border-color: var(--line-strong); }
 .purpose > span > span { display: block; }
-@media (max-width: 760px) { .replies { padding-left: 16px; padding-right: 16px; } .ai-needs, .out-preview { margin-left: 16px; margin-right: 16px; } .composer select { max-width: 96px; } }
+@media (max-width: 760px) { .replies { padding-left: 16px; padding-right: 16px; } .ai-needs, .out-preview, .tr-offer { margin-left: 16px; margin-right: 16px; } .composer select { max-width: 96px; } }
 
 /* Cumulus://ID */
 .cid-step { border: 1px solid var(--line); padding: 14px; margin: 14px 0; display: grid; gap: 8px; }

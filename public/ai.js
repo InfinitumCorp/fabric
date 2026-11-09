@@ -265,7 +265,12 @@ export function createAi({ target = baseLang(navigator.language) } = {}) {
     return route?.length ? route.length * TRANSLATION_SIZE_MB : null;
   }
 
-  return { target, status, download, summarize, translate, translateOut, translatorState, translationMb, languageOf, replies };
+  return {
+    get target() { return target; },
+    /** Follow the interface language (@infinitum/i18n), so translated messages and the UI agree. */
+    setTarget(lang) { const b = baseLang(lang); if (b) target = b; },
+    status, download, summarize, translate, translateOut, translatorState, translationMb, languageOf, replies,
+  };
 }
 
 /**

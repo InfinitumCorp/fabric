@@ -36,6 +36,7 @@ import { avatarOf, isNewer, needsProfile, profilePayload, AVATAR_PX } from '/sha
 import { waExtrasOf, dropFromBlocked, mentionsMe } from '/shared/wa.js';
 import { installWa } from '/wa.js';
 import { installStatus } from '/status.js';
+import { i18n } from './i18n/start.js'; // interface language: build-time catalogs, no runtime calls
 
 // ---------- local vault (keys + history stay on this device, encrypted) ----------
 // ?profile=name lets several devices/accounts run side by side in one browser for testing.
@@ -68,7 +69,8 @@ const fresh = () => ({
 const QS_AI = new URLSearchParams(location.search);
 if (QS_AI.get('media') === 'test' && QS_AI.get('ai') === 'fake') installFakeModels();
 if (QS_AI.get('media') === 'test' && QS_AI.get('ai') === 'open') hideBuiltInModels();
-const ai = createAi();
+const ai = createAi({ target: i18n.locale }); // messages translate into the interface language
+i18n.subscribe(() => ai.setTarget(i18n.locale));
 const aiPrefs = () => { db.ai ??= { replies: true }; return normalizePrefs(db.ai); };
 const LANG_RE = /^[a-z]{2,3}$/;
 const translating = (peer) => translatingIn(aiPrefs(), peer);
@@ -91,9 +93,13 @@ function persist() {
 }
 
 const $ = (id) => document.getElementById(id);
+// What people wrote (messages, names, files, polls) is never run through the interface
+// translator (@infinitum/i18n); only the app's own wording is.
+const USER_TEXT = /(^|\s)(msg-text|quote-text|quote-from|contact-name|preview|pin-text|file-name|poll-label|sp-author|st-name|spoiler|bot-about|sp-ad-title)(\s|$)/;
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
+  if (cls && USER_TEXT.test(cls)) n.setAttribute('translate', 'no');
   if (text != null) n.textContent = text;
   return n;
 };
@@ -1261,11 +1267,11 @@ function renderMessages() {
     const translated = !mine && !m.sentTr && m.tr?.text && translating(active); // shown translated; the original opens underneath
     const flipped = m.sentTr && showOriginal.has(m.id); // a message sent translated, shown as written
     const shown = flipped ? m.sentTr.text : translated ? m.tr.text : m.text;
-    if (q && shown.toLowerCase().includes(q)) { li.append(...highlighted(shown, q, 'msg-text').childNodes); li.classList.add('hit'); hits++; lastHit = li; }
+    if (q && shown.toLowerCase().includes(q)) { { const t = el('span', 'msg-text'); t.append(...highlighted(shown, q, 'msg-text').childNodes); li.append(t); } li.classList.add('hit'); hits++; lastHit = li; }
     else if (wa?.renderBody(li, m)) { /* a location or contact card */ }
     else if (m.poll && desk) desk.renderPoll(li, m);
     else if (desk) { const t = el('span', 'msg-text'); desk.formatInto(t, shown); wa?.markMentions(t); li.append(t); }
-    else li.append(document.createTextNode(shown));
+    else li.append(el('span', 'msg-text', shown));
     const time = new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const ed = m.edited ? 'edited · ' : '';
     const seen = mine && m.read && userPrefs().receipts !== false;

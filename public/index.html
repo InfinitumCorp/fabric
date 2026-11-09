@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="/style.css" />
   <link rel="stylesheet" href="/bots.css" />
   <link rel="stylesheet" href="/spaces.css" />
+  <link rel="stylesheet" href="/i18n/i18n.css" />
 </head>
 <body>
   <div id="boot" class="boot" aria-hidden="true"><img src="/brand/fabric-icon.svg" alt="" width="96" height="96" /><div class="brand">FabriC++<sup>™</sup></div></div>
@@ -149,7 +150,7 @@
             <button type="button" id="back" class="icon-btn back" title="Back to chats" aria-label="Back to chats"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
             <div id="peer-avatar" class="avatar" aria-hidden="true"></div>
             <div class="peer-box">
-              <div id="peer" class="peer"></div>
+              <div id="peer" class="peer" translate="no"></div>
               <div class="peer-sub muted small"><span id="peer-status">🔒 End-to-end encrypted<span id="pq-badge"></span></span><span id="typing" class="typing hidden"></span></div>
             </div>
             <div class="head-actions">
@@ -226,7 +227,7 @@
           <div class="profile-card">
             <button type="button" id="settings-photo" class="photo-btn" aria-label="Profile photo"><div id="settings-avatar" class="avatar big" aria-hidden="true"></div></button>
             <div>
-              <div id="settings-handle" class="peer"></div>
+              <div id="settings-handle" class="peer" translate="no"></div>
               <div id="settings-device" class="muted small"></div>
               <div class="photo-actions">
                 <button type="button" class="ghost small" id="photo-pick">Add photo</button>
@@ -270,6 +271,7 @@
             <li><button type="button" data-go="phone"><span>Phone numbers</span><small>Your number, call and text log</small></button></li>
             <li><button type="button" data-go="earn"><span>Earn</span><small>Opt-in research, payouts, receipts</small></button></li>
             <li><button type="button" id="bots-settings"><span>Bots</span><small>Make a bot with +forgebot and get its Bot API token</small></button></li>
+            <li class="lang-row"><div><span>Language</span><small>App language. Messages you receive translate into it.</small></div><div id="lang-switch"></div></li>
           </ul>
           <p class="muted small settings-about">FabriC++™ by Infinitum Corporation. Messages and calls are end-to-end encrypted; the relay can't read them.</p>
         </div>

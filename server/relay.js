@@ -39,6 +39,7 @@ import { cidFromEnv, createCid } from './cid.js';
 import { turnFromEnv, turnCredentials } from './turn.js';
 import { createScalvs, scalvsFromEnv, isScalvsAccount, SCALVS_HANDLE } from './scalvs.js';
 import { aiFromEnv, createAi } from './scalvs-ai.js';
+import { localAiFromEnv, createLocalAi } from './scalvs-local.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MAX_ENVELOPE_BYTES = 512 * 1024; // link payloads carry a history snapshot
@@ -134,7 +135,8 @@ export async function createRelay({
   const relayIdentity = await generateIdentity(); // per-process; used only for ownership proofs
   // Scalvs's keys are loaded before the relay listens, so its handle is reserved from the start.
   // `ai` is either a config from aiFromEnv or (tests) anything with ask(handle, text).
-  const scalvsAi = !scalvs?.ai ? null : typeof scalvs.ai.ask === 'function' ? scalvs.ai : createAi({ ...scalvs.ai, log });
+  const scalvsAi = !scalvs?.ai ? null : typeof scalvs.ai.ask === 'function' ? scalvs.ai
+    : scalvs.ai.local ? createLocalAi({ ...scalvs.ai, log }) : createAi({ ...scalvs.ai, log }); // open model, or Claude
   const bot = scalvs ? await createScalvs({ stateFile: scalvs.stateFile ?? null, ai: scalvsAi, log }) : null;
   const online = new Map(); // "handle#device" -> ws
   const mailboxes = new Map(); // id -> { ws, expires }
@@ -315,7 +317,7 @@ export async function createRelay({
       // TURN logins are only handed out over a signed-in socket ('ice'), never here
       if (url.pathname === '/api/models') return json(200, { available: Boolean(modelProxy) });
       if (url.pathname === '/api/ice') return json(200, { iceServers, sfu: Boolean(sfuSvc), turn: Boolean(turn) });
-      if (url.pathname === '/api/scalvs') return json(200, { enabled: Boolean(bot), handle: bot ? bot.handle : null, ai: Boolean(scalvsAi) });
+      if (url.pathname === '/api/scalvs') return json(200, { enabled: Boolean(bot), handle: bot ? bot.handle : null, ai: Boolean(scalvsAi), ...(scalvsAi?.model ? { model: scalvsAi.model } : {}) });
       if (url.pathname === '/api/cid') return json(200, { enabled: Boolean(cidSvc), required: Boolean(cidSvc && cid.required) });
       if (url.pathname === '/api/cid/backup') {
         if (!cidSvc) return json(404, { error: 'Cumulus://ID is not set up on this relay' });
@@ -902,9 +904,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const backup = backupCfg ? createBackup(backupCfg) : null;
   if (backup) await backup.restoreIfMissing(dataFile); // a fresh host picks up where the last one stopped
   const scalvs = scalvsFromEnv(process.env, dataFile);
-  const relay = await createRelay({ port, dataFile, scalvs: scalvs && { ...scalvs, ai: aiFromEnv() } });
+  // AI tasks: Claude with an Anthropic key, else an open model on this machine (FABRIC_SCALVS_LOCAL=0: none)
+  const scalvsAi = scalvs && (aiFromEnv() || localAiFromEnv(process.env, ROOT));
+  const relay = await createRelay({ port, dataFile, scalvs: scalvs && { ...scalvs, ai: scalvsAi } });
   console.log(`FABRIC relay listening on ${relay.url}`);
-  if (scalvs) console.log(`[relay] Scalvs runs tasks as +scalvs.veil (AI tasks ${aiFromEnv() ? 'on' : 'off: set FABRIC_SCALVS_AI_KEY to turn them on'})`);
+  if (scalvs) console.log(`[relay] Scalvs runs tasks as +scalvs.veil (AI tasks: ${!scalvsAi ? 'off' : scalvsAi.local ? 'open model on this machine' : scalvsAi.model})`);
   if (backup) {
     await backup.start(relay.store);
     console.log(`[backup] snapshots to Supabase every ${backupCfg.intervalMs / 60_000} min when data changes`);

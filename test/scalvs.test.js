@@ -252,3 +252,46 @@ test('Scalvs off: the handle stays reserved and the API says so', async (t) => {
   assert.equal(error, 'handle reserved');
   c.close();
 });
+
+// ---------- AI tasks on an open model on the relay host ----------
+import http from 'node:http';
+import { createLocalAi, ensureModelFiles } from '../server/scalvs-local.js';
+
+test('open-model AI tasks: no key, short history per chat, daily cap, help says they stay encrypted', async () => {
+  const seen = [];
+  let t = 0;
+  const ai = createLocalAi({ dir: null, source: null, dailyPerUser: 3, now: () => t, log: () => {}, generate: async (messages) => { seen.push(messages); return `reply ${seen.length}`; } });
+  assert.equal(await ai.ask('@amy.veil', 'one'), 'reply 1');
+  assert.equal(await ai.ask('@amy.veil', 'two'), 'reply 2');
+  assert.deepEqual(seen[1].map((m) => m.role), ['system', 'user', 'assistant', 'user']);
+  assert.equal(seen[1][2].content, 'reply 1');
+  assert.equal((await ai.ask('@ben.veil', 'hi'), seen[2].length), 2, 'chats are per person');
+  await ai.ask('@amy.veil', 'three');
+  await assert.rejects(ai.ask('@amy.veil', 'four'), (e) => /today's 3 AI tasks/.test(e.userMessage));
+  const help = (await runTask('help', ctx({ ai: async () => '', aiNote: ai.note }))).reply;
+  assert.match(help, /end-to-end encrypted/);
+  assert.doesNotMatch(help, /Anthropic/);
+});
+
+test('open-model files: missing ones are fetched, a cut-off download resumes with a Range request', async (t) => {
+  const body = Buffer.from('x'.repeat(10_000));
+  const ranges = [];
+  let cut = true;
+  const server = http.createServer((req, res) => {
+    if (!req.url.endsWith('/onnx/model_uint8.onnx')) { res.writeHead(200, { 'content-length': 2 }); return res.end('{}'); }
+    ranges.push(req.headers.range || null);
+    const m = /^bytes=(\d+)-$/.exec(req.headers.range || '');
+    const from = m ? Number(m[1]) : 0;
+    res.writeHead(m ? 206 : 200, { 'content-length': body.length - from });
+    if (cut) { cut = false; res.write(body.subarray(0, 4000)); return setTimeout(() => res.destroy(), 20); } // connection drops part-way
+    res.end(body.subarray(from));
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'scalvs-models-'));
+  t.after(() => { server.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const source = `http://127.0.0.1:${server.address().port}`;
+  assert.equal(await ensureModelFiles({ dir, source, model: 'org/m', tries: 3 }), 5);
+  assert.deepEqual(fs.readFileSync(path.join(dir, 'org/m/onnx/model_uint8.onnx')), body);
+  assert.deepEqual(ranges, [null, 'bytes=4000-']);
+  assert.equal(await ensureModelFiles({ dir, source, model: 'org/m' }), 0, 'nothing fetched twice');
+});

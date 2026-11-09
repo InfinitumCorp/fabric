@@ -160,6 +160,7 @@ const clean = (s, max) => String(s ?? '')
  * @param {number} [ctx.now]        clock, for tests
  * @param {object} ctx.reminders    { add(at, text) → count, list() → [{at,text}], clear() → count }
  * @param {((text) => Promise<string>)|null} [ctx.ai]  AI task hook, or null when the relay has none
+ * @param {string} [ctx.aiNote]     where AI tasks go, for help (defaults to AI_NOTE, the Anthropic API)
  * @returns {Promise<{ reply: string, kind: string }>} kind says which task ran (usage metering, tests)
  */
 export async function runTask(input, ctx) {
@@ -173,7 +174,7 @@ export async function runTask(input, ctx) {
   const arg = cmd.slice(word.length).trim();
 
   if (['help', 'start', 'menu', '?', 'commands'].includes(lower)) {
-    return out([...HELP, ...(ctx.ai ? [AI_HELP, '', AI_NOTE] : [])].join('\n'), 'help');
+    return out([...HELP, ...(ctx.ai ? [AI_HELP, '', ctx.aiNote || AI_NOTE] : [])].join('\n'), 'help');
   }
   if (lower === 'ping') return out('pong', 'ping');
   if (word === 'calc' || word === 'calculate' || LOOKS_LIKE_SUM.test(cmd)) {

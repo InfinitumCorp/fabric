@@ -50,7 +50,8 @@ async function loadState(stateFile) {
  * the handle; call start(url) once the relay is up.
  * @param {object} o
  * @param {string|null} o.stateFile  where keys and ratchet state live; null keeps them in memory (tests)
- * @param {object|null} [o.ai]       { ask(handle, text) } from server/scalvs-ai.js, or null for built-in tasks only
+ * @param {object|null} [o.ai]       { ask(handle, text), note, warm? } from scalvs-ai.js (Claude) or scalvs-local.js
+ *                                   (open model), or null for built-in tasks only
  */
 export async function createScalvs({ stateFile = null, ai = null, log = console.log, now = Date.now, reconnectMs = 1000 } = {}) {
   const state = await loadState(stateFile);
@@ -160,6 +161,7 @@ export async function createScalvs({ stateFile = null, ai = null, log = console.
       handle: msg.from,
       now: now(),
       ai: ai ? (t) => ai.ask(msg.from, t) : null,
+      aiNote: ai?.note,
       reminders: remindersFor(msg.from),
     });
     log(`[scalvs] task ${result.kind}`); // never the text or who asked
@@ -277,6 +279,7 @@ export async function createScalvs({ stateFile = null, ai = null, log = console.
     accountKey: state.account.publicJwk,
     /** Sign in to the relay at this http(s) URL; resolves once registered. */
     start(url, wsOptions = {}) {
+      ai?.warm?.()?.catch(() => {}); // fetch and load an open model before the first AI task, not during it
       connect(url, wsOptions);
       return new Promise((r) => readyWaiters.push(r));
     },

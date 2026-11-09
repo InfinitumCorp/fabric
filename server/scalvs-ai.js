@@ -5,6 +5,7 @@
 // Scalvs says so in its help. History is kept in memory only, never on disk.
 
 import Anthropic from '@anthropic-ai/sdk';
+import { AI_NOTE } from './scalvs-tasks.js';
 
 export const DEFAULT_MODEL = 'claude-opus-5-5';
 const HISTORY_TURNS = 8;         // user+assistant pairs remembered per chat
@@ -86,5 +87,5 @@ export function createAi({ apiKey, model = DEFAULT_MODEL, dailyPerUser = 50, cli
     return reply;
   }
 
-  return { ask, forget: (handle) => chats.delete(handle), model };
+  return { ask, forget: (handle) => chats.delete(handle), model, note: AI_NOTE };
 }

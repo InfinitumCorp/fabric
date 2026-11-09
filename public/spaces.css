@@ -1,0 +1,80 @@
+/* Channels, large groups, FabriC++ Plus, sponsored posts. House style: white, hairlines, square
+   corners, ink #111820, accent #2454dd. */
+.sp-view { padding: 0; }
+.sp-cols { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; height: 100%; min-height: 0; }
+.sp-side { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.sp-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px 12px; border-bottom: 1px solid var(--line); }
+.sp-actions .ghost { font-size: 13px; padding: 6px 10px; }
+.sp-list { list-style: none; margin: 0; padding: 0; overflow: auto; }
+.sp-list li { display: flex; gap: 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.sp-list li:hover { background: var(--panel-2); }
+.sp-list li.active { box-shadow: inset 3px 0 0 var(--accent); background: var(--panel-2); }
+.sp-list .contact-main { min-width: 0; flex: 1; }
+.sp-list .contact-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-ico { display: inline-flex; width: 16px; height: 16px; vertical-align: -3px; }
+.sp-ico svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.6; }
+.sp-avatar { width: 40px; height: 40px; flex: none; border: 1px solid var(--line-strong); align-items: center; justify-content: center; }
+.sp-avatar svg { width: 20px; height: 20px; }
+.sp-feed { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.sp-empty { padding: 48px 32px; max-width: 520px; }
+.sp-empty h2 { margin: 0 0 8px; font-size: 22px; letter-spacing: -.01em; }
+.sp-privacy { font-size: 13px; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+.sp-privacy.ok { color: var(--ok); }
+.sp-privacy.open { color: var(--warn); background: var(--warn-bg); }
+p.sp-privacy { border: 1px solid var(--line); margin: 8px 0; }
+.sp-posts { list-style: none; margin: 0; padding: 16px; overflow: auto; flex: 1; background: var(--chat-bg); display: flex; flex-direction: column; gap: 12px; }
+.sp-post, .sp-ad { background: var(--panel); border: 1px solid var(--line); padding: 12px 14px; max-width: 640px; width: 100%; }
+.sp-post-head { margin-bottom: 4px; }
+.sp-author { color: var(--text); font-weight: 600; }
+.sp-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.sp-img { max-width: 100%; display: block; margin-top: 8px; border: 1px solid var(--line); }
+.sp-foot { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.sp-reacts { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; }
+.sp-react { background: var(--panel); border: 1px solid var(--line); border-radius: 0; padding: 2px 8px; font-size: 13px; cursor: pointer; min-height: 28px; }
+.sp-react:hover { border-color: var(--accent); }
+.sp-react.mine { border-color: var(--ink); background: var(--ink); color: var(--on-ink); }
+.sp-react-add { color: var(--muted); }
+.sp-pick { display: flex; gap: 4px; flex-wrap: wrap; width: 100%; }
+.sp-views { display: inline-flex; gap: 4px; align-items: center; }
+.sp-del { font-size: 12px; padding: 2px 8px; }
+.sp-composer { border-top: 1px solid var(--line); }
+.sp-readonly { padding: 10px 16px; margin: 0; border-top: 1px solid var(--line); }
+.sp-loading { align-self: center; }
+/* sponsored: always labelled, never styled to pass for a message */
+.sp-ad { border-style: dashed; border-color: var(--line-strong); }
+.sp-ad-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.sp-ad-label { font: 600 11px/1 var(--mono); text-transform: uppercase; letter-spacing: .08em; border: 1px solid var(--line-strong); padding: 3px 6px; }
+.sp-ad-why { margin-left: auto; background: none; border: 0; color: var(--accent); font-size: 12px; cursor: pointer; padding: 4px; text-decoration: underline; }
+.sp-ad-hide { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 4px 6px; }
+.sp-ad-title { display: block; }
+.sp-ad-body { color: var(--muted); margin: 2px 0 8px; }
+.sp-ad-cta { font-size: 13px; padding: 4px 10px; }
+.contacts .sp-ad-list { margin: 6px 12px; max-width: none; width: auto; cursor: default; display: block; }
+.contacts .sp-ad-list:hover { background: var(--panel); }
+.sp-why { padding-left: 18px; margin: 0 0 12px; font-size: 14px; }
+.sp-why li { margin: 6px 0; }
+.sp-dialog { max-width: 560px; width: calc(100% - 32px); }
+.sp-dialog .field select, .sp-dialog .field input { width: 100%; }
+.sp-vis { border: 0; padding: 0; margin: 8px 0; }
+.sp-preview { margin: 8px 0; }
+.sp-linkrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.sp-linkrow code { flex: 1 1 100%; overflow-wrap: anywhere; background: var(--panel-2); padding: 4px 6px; }
+.sp-invites, .sp-members { list-style: none; padding: 0; margin: 0 0 8px; max-height: 260px; overflow: auto; }
+.sp-members li { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.sp-members .contact-name { flex: 1; }
+.ghost.small { font-size: 12px; padding: 3px 8px; }
+.ghost.danger { color: var(--err); border-color: var(--err); }
+.sp-compare { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
+.sp-compare th, .sp-compare td { border-bottom: 1px solid var(--line); padding: 8px 6px; text-align: left; vertical-align: top; }
+.sp-compare thead th { font-weight: 600; border-bottom: 1px solid var(--line-strong); }
+.sp-compare thead small { display: block; font-weight: 400; color: var(--muted); }
+.sp-compare tbody th { font-weight: 400; color: var(--muted); }
+.sp-compare td.cur { font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+.sp-badge { display: inline-block; margin-left: 6px; font: 600 10px/1 var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--accent); border: 1px solid var(--accent); padding: 2px 4px; vertical-align: 2px; }
+@media (max-width: 760px) {
+  .sp-cols { grid-template-columns: 1fr; }
+  .sp-view.sp-open .sp-side { display: none; }
+  .sp-view:not(.sp-open) .sp-feed, .sp-view:not(.sp-open) .sp-empty { display: none; }
+  .sp-side { border-right: 0; }
+  .sp-posts { padding: 12px; }
+}

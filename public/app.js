@@ -20,6 +20,7 @@ import { TRANSLATION_LANGS } from '/shared/models.js';
 import { createCalls } from '/calls.js';
 import { createPhone, toE164, formatNumber } from '/phone.js';
 import { mountDialpad, isTouch } from '/dialpad.js';
+import { mountSpaces } from '/spaces.js';
 import { seal, peekSealed, openSealed, isDeliveryKey } from '/shared/sealed.js';
 import { applyAction, actionPayload, quoteOf, extrasOf, reactionSummary, QUICK_REACTIONS } from '/shared/actions.js';
 import {
@@ -316,6 +317,7 @@ async function register() {
   wsSend({ type: 'register', handle: db.handle, deviceId: db.deviceId, list: db.self.list, proof });
 }
 
+let spacesUi = null; // public/spaces.js, mounted with the other controls below
 let onboardWait = null; // {resolve, reject} while a new device is being registered
 
 async function handle(msg) {
@@ -323,6 +325,7 @@ async function handle(msg) {
     const p = pending.get(msg.ref); pending.delete(msg.ref);
     return msg.type === 'error' ? p.reject(new Error(msg.error)) : p.resolve(msg);
   }
+  if (spacesUi?.onRelay(msg)) return; // channels, large groups, plans, sponsored posts
   switch (msg.type) {
     case 'hello':
       hello = msg;
@@ -340,6 +343,7 @@ async function handle(msg) {
       if (onboardWait) { onboardWait.resolve(); onboardWait = null; }
       flushOutbox();
       calls?.reconnected();
+      spacesUi?.connected();
       return;
     case 'sfu_offer':
     case 'sfu_members':
@@ -779,6 +783,10 @@ async function processEnvelope(env) {
     if (!fromSelf) calls?.onSignal(env, payload);
     return;
   }
+  if (payload.kind === 'space_key') { // a large group's or channel's new key, from an admin
+    spacesUi?.onKey(payload, fromSelf ? db.handle : env.from);
+    return;
+  }
   // which chat a control payload belongs to: a group I'm in (by gid), else the contact
   const keyOf = () => {
     if (payload.gid !== undefined) {
@@ -976,6 +984,7 @@ function renderContacts() {
       : 'No chats yet. Type an address like +alex above and press +.';
     ul.append(el('li', 'contacts-empty', hint));
   }
+  spacesUi?.chatListAd(ul); // free plan: one sponsored row, labelled
   renderSearchHits(q);
 }
 const searchQuery = () => ($('add-handle')?.value || '').trim().toLowerCase().replace(/^[+]/, '@').replace(/^@$/, '');
@@ -1574,8 +1583,8 @@ async function demoSettle() {
 }
 
 // ---------- tabs & app shell ----------
-const VIEWS = ['chats', 'calls', 'phone', 'settings', 'earn', 'security'];
-const SUBVIEWS = { earn: 'settings', security: 'settings' }; // opened from Settings; back returns there
+const VIEWS = ['chats', 'calls', 'phone', 'settings', 'earn', 'security', 'spaces', 'plus'];
+const SUBVIEWS = { earn: 'settings', security: 'settings', spaces: 'chats', plus: 'settings' }; // opened from Settings; back returns there
 let currentTab = 'chats';
 function switchTab(name) {
   currentTab = name;
@@ -1587,6 +1596,7 @@ function switchTab(name) {
   if (name === 'phone') phone?.refresh();
   if (name === 'calls') renderCallLog();
   if (name === 'settings') renderSettings();
+  spacesUi?.onShow(name); // channels, large groups, Plus (public/spaces.js)
   // phones show one screen at a time: the chat list, a top-level section, or a deep screen
   if (name === 'chats') setScreen(active && !$('thread').classList.contains('hidden') ? 'deep' : 'list');
   else setScreen(SUBVIEWS[name] ? 'deep' : 'main');
@@ -3171,6 +3181,15 @@ $('text').addEventListener('paste', (e) => {
 $('viewer').onclick = closeViewer;
 $('new-group').onclick = openNewGroup;
 $('new-action').onclick = openNewSheet;
+spacesUi = mountSpaces({
+  request, wsSend, toast, switchTab, me: () => db.handle,
+  vault: { get: () => db, save: () => persist() },
+  // a space key goes over the one-to-one encrypted session; to myself = my other devices only
+  sendKey: async (h, payload) => {
+    if (h !== db.handle) await ensureContacts([h]);
+    await sendControl(h, payload, { self: h === db.handle });
+  },
+});
 for (const b of document.querySelectorAll('[data-new]')) b.onclick = () => startNew(b.dataset.new);
 $('new-sheet').addEventListener('click', (e) => { if (e.target === $('new-sheet')) $('new-sheet').close(); }); // tap outside
 $('pick-cancel').onclick = () => $('pick-dialog').close();

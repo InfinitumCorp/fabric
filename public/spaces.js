@@ -436,7 +436,7 @@ export function mountSpaces({ request, wsSend, toast, switchTab, me, vault, send
 
   // ---------- info: invites, members, roles, settings ----------
   const linkFor = (s, code) => {
-    if (!code) return `${location.origin}/#join=${encodeURIComponent(showHandle(s.handle))}`;
+    if (!code) return `${location.origin}/#join=${showHandle(s.handle)}`;
     const k = keyFor(s.id, s.epoch);
     return `${location.origin}/#join=${code}.${b64url(k)}`;
   };

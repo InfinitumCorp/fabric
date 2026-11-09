@@ -78,3 +78,10 @@ p.sp-privacy { border: 1px solid var(--line); margin: 8px 0; }
   .sp-side { border-right: 0; }
   .sp-posts { padding: 12px; }
 }
+.sp-dialog .pref { text-align: left; }
+.sp-dialog .pref input { width: auto; flex: none; }
+.sp-dialog .pref small strong { color: var(--warn); }
+.sp-ad-why { white-space: nowrap; }
+.contacts .sp-ad-head .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-dialog select { padding: 8px; border: 1px solid var(--line); border-radius: 0; background: var(--panel); color: var(--text); }
+.sp-dialog .ghost.danger { background: var(--panel); color: var(--err); border: 1px solid var(--err); }

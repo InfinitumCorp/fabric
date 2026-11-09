@@ -20,6 +20,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.view.Gravity;
 import android.graphics.Typeface;
+import android.webkit.GeolocationPermissions;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
@@ -48,6 +49,9 @@ public class MainActivity extends Activity {
     private static final boolean RELEASE = false;
     private static final int PERMS = 1;
     private static final int PICK_FILE = 2;
+    private static final int GEO = 3;
+    private GeolocationPermissions.Callback geoPending;
+    private String geoOrigin;
 
     private WebView web;
     private Uri relay;
@@ -83,6 +87,7 @@ public class MainActivity extends Activity {
         // the page tells the shell when it switches to dark, so the status and navigation bars match
         web.addJavascriptInterface(new Shell(), "FabricShell");
         WebSettings s = web.getSettings();
+        s.setGeolocationEnabled(true); // the page asks only when you send your location
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setDatabaseEnabled(true);
@@ -117,6 +122,20 @@ public class MainActivity extends Activity {
             @Override
             public void onPermissionRequest(PermissionRequest request) {
                 runOnUiThread(() -> askFor(request));
+            }
+
+            /** Location, for Send > Location only: the relay's own page, never remembered by the WebView. */
+            @Override
+            public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
+                if (!sameOrigin(Uri.parse(origin))) { callback.invoke(origin, false, false); return; }
+                if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                    || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                    callback.invoke(origin, true, false);
+                    return;
+                }
+                geoPending = callback;
+                geoOrigin = origin;
+                requestPermissions(new String[] { Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION }, GEO);
             }
 
             /** Photos and files to send: Android's own picker, nothing read without the user choosing. */
@@ -311,6 +330,13 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
         if (code == PERMS && pending != null) { grantAllowed(pending); pending = null; }
+        if (code == GEO && geoPending != null) {
+            boolean ok = false;
+            for (int r : results) ok |= r == PackageManager.PERMISSION_GRANTED;
+            geoPending.invoke(geoOrigin, ok, false);
+            geoPending = null;
+            geoOrigin = null;
+        }
     }
 
     @Override

@@ -314,7 +314,7 @@ export async function createRelay({
     // with COOP, makes the page cross-origin isolated, so on-device models can use several threads
     res.setHeader('cross-origin-embedder-policy', 'credentialless');
     res.setHeader('cross-origin-resource-policy', 'same-origin');
-    res.setHeader('permissions-policy', 'camera=(self), microphone=(self), geolocation=(), display-capture=()');
+    res.setHeader('permissions-policy', 'camera=(self), microphone=(self), geolocation=(self), display-capture=()');
     if (tls) res.setHeader('strict-transport-security', 'max-age=31536000; includeSubDomains');
   }
 

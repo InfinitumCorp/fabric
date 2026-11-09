@@ -73,7 +73,7 @@ export function installWa(api) {
           api.sendText(locFallback(l), null, { loc: l }, to);
         })));
       d.showModal();
-    }, (err) => toast(err.code === 1 ? 'Location permission was denied.' : 'Couldn’t get your location.'), { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
+    }, (err) => toast(err.code === 2 || err.code === 3 ? 'Couldn’t get your location. Is location on?' : 'Location isn’t allowed for FabriC++. You can allow it in this device’s settings.'), { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
   }
 
   function shareContact(to) {

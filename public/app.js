@@ -1072,6 +1072,9 @@ function previewOf(key, last) {
   const who = last.from === db.handle ? 'You: ' : isGroupKey(key) ? `${shortName(last.from)}: ` : '';
   if (last.deleted) return who + 'Message deleted';
   const text = last.from !== db.handle && !last.sentTr && last.tr?.text && translating(key) ? last.tr.text : last.text; // as shown in the chat
+  if (last.once) return who + 'View-once photo';
+  if (last.loc) return who + '📍 ' + (last.loc.label || 'Location');
+  if (last.card) return who + '👤 Contact';
   return who + mediaLabel(last.media, plainText(text));
 }
 function renderContacts() {

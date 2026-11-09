@@ -950,7 +950,8 @@ function previewOf(key, last) {
   if (!last) return isGroupKey(key) ? (db.threads[key]?.at(-1)?.text || 'No messages yet') : 'No messages yet';
   const who = last.from === db.handle ? 'You: ' : isGroupKey(key) ? `${shortName(last.from)}: ` : '';
   if (last.deleted) return who + 'Message deleted';
-  return who + mediaLabel(last.media, plainText(last.text));
+  const text = last.from !== db.handle && !last.sentTr && last.tr?.text && translating(key) ? last.tr.text : last.text; // as shown in the chat
+  return who + mediaLabel(last.media, plainText(text));
 }
 function renderContacts() {
   const ul = $('contacts');
@@ -1334,6 +1335,7 @@ async function translateEntry(peer, m, { allowDownload = false, onProgress } = {
     m.tr = { from: r.from, text: String(r.text).slice(0, 8000) };
     persist();
     noteTranslated(peer, r.from);
+    renderContacts(); // the chat list shows the translation too
     if (peer === active) renderMessages();
   } catch (e) {
     console.warn('on-device translation failed', e);
@@ -3445,6 +3447,12 @@ desk = installDesk({
 bots = installBots({
   $, el, toast, SAVED: typeof SAVED === 'undefined' ? null : SAVED, db: () => db, active: () => active, persist, isGroupKey, groupFor, addContact,
   signedIn: () => registered, renderMessages, renderThreadHead, sendControl: (...a) => sendControl(...a), sendText: (...a) => sendText(...a),
+  // a bot's answer to a button press, translated on this device (only if the model is already here)
+  translateAnswer: async (from, text) => {
+    if (!translating(from)) return null;
+    const r = await ai.translate(text);
+    return r?.text ? `${String(r.text).slice(0, 400)} · translated from ${languageName(r.from)}` : null;
+  },
 });
 startHandleDisplay();
 boot();

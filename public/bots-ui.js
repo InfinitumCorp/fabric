@@ -64,7 +64,10 @@ export function installBots(x) {
     pressing.delete(a.qid);
     p.button?.classList.remove('pressing');
     if (!a.text) return;
-    if (a.alert) showAlert(from, a.text); else toast(a.text);
+    // translated on this device like the bot's messages, when translation is on in that chat
+    const show = (text) => { if (a.alert) showAlert(from, text); else toast(text); };
+    if (!x.translateAnswer) return show(a.text);
+    x.translateAnswer(from, a.text).then((t) => show(t || a.text), () => show(a.text));
   }
 
   function showAlert(from, text) {

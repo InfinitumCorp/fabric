@@ -77,7 +77,8 @@ function harness() {
   };
 }
 
-test('sfu: every member receives every other member, renegotiates on join and leave', { timeout: 40_000 }, async () => {
+// real WebRTC between several peers: ~25 s alone, much longer while the other test files run in parallel
+test('sfu: every member receives every other member, renegotiates on join and leave', { timeout: 120_000 }, async () => {
   const h = harness();
   try {
     const a = h.add('@ana#d1');

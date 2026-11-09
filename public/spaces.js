@@ -106,26 +106,32 @@ export function mountSpaces({ request, wsSend, toast, switchTab, me, vault, send
   const dlg = (id, html) => { const d = el('dialog', 'fwd-dialog sp-dialog'); d.id = id; d.innerHTML = html; document.body.append(d); return d; };
   const createDlg = dlg('sp-create', `
     <h3 id="spc-title">New channel</h3>
-    <label class="field"><span>Name</span><input id="spc-name" maxlength="64" autocomplete="off" placeholder="Name" /></label>
+    <label class="field"><span>Name</span><input id="spc-name" maxlength="64" autocomplete="off" enterkeyhint="go" placeholder="Name" /></label>
     <fieldset class="sp-vis" id="spc-vis">
       <label class="pref"><input type="radio" name="spc-vis" value="private" checked /><span>Private<small>End-to-end encrypted. People join with an invite link; the key travels in the link and never reaches the relay.</small></span></label>
       <label class="pref"><input type="radio" name="spc-vis" value="public" /><span>Public<small>Anyone can find and read it at its +name.veil address. <strong>Not end-to-end encrypted</strong>: there is no way to encrypt to readers nobody knows, so the relay stores public posts as plain text.</small></span></label>
     </fieldset>
-    <label class="field hidden" id="spc-handle-row"><span>Address</span><input id="spc-handle" maxlength="30" autocomplete="off" placeholder="+name.veil" /></label>
+    <label class="field hidden" id="spc-handle-row"><span>Address</span><input id="spc-handle" maxlength="30" autocomplete="off" enterkeyhint="go" placeholder="+name.veil" /></label>
     <label class="field hidden" id="spc-topic-row"><span>Topic</span><select id="spc-topic">${TOPICS.map((t) => `<option value="${t}">${t[0].toUpperCase()}${t.slice(1)}</option>`).join('')}</select><small class="muted">Sponsored posts here are matched to the topic, never to readers.</small></label>
-    <label class="field"><span>About</span><input id="spc-about" maxlength="280" autocomplete="off" placeholder="Optional" /></label>
+    <label class="field"><span>About</span><input id="spc-about" maxlength="280" autocomplete="off" enterkeyhint="go" placeholder="Optional" /></label>
     <p class="muted small" id="spc-note"></p>
     <p id="spc-error" class="error small"></p>
     <div class="dialog-actions"><button class="ghost" type="button" id="spc-cancel">Cancel</button><button class="primary" type="button" id="spc-ok">Create</button></div>`);
   const joinDlg = dlg('sp-join', `
     <h3>Join a channel or group</h3>
-    <label class="field"><span>Public address or invite link</span><input id="spj-in" autocomplete="off" placeholder="+name.veil or invite link" /></label>
+    <label class="field"><span>Public address or invite link</span><input id="spj-in" autocomplete="off" enterkeyhint="go" placeholder="+name.veil or invite link" /></label>
     <div id="spj-preview" class="sp-preview"></div>
     <p id="spj-error" class="error small"></p>
     <div class="dialog-actions"><button class="ghost" type="button" id="spj-cancel">Cancel</button><button class="primary" type="button" id="spj-ok">Look up</button></div>`);
   const infoDlg = dlg('sp-info', '<div id="spi-body"></div><div class="dialog-actions"><button class="ghost" type="button" id="spi-close">Close</button></div>');
   const whyDlg = dlg('sp-why', '<h3>Why am I seeing this?</h3><ul id="spw-list" class="sp-why"></ul><div class="dialog-actions"><button class="ghost" type="button" id="spw-plus">No ads with Plus</button><button class="primary" type="button" id="spw-close">OK</button></div>');
   for (const d of [createDlg, joinDlg, infoDlg, whyDlg]) d.addEventListener('click', (e) => { if (e.target === d) d.close(); });
+  // Enter in a one-line field submits, so a phone keyboard covering the buttons doesn't strand you
+  for (const [d, ok] of [[createDlg, 'spc-ok'], [joinDlg, 'spj-ok']]) {
+    d.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.isComposing && e.target.matches('input:not([type=radio]):not([type=checkbox])')) { e.preventDefault(); e.target.blur(); $(ok).click(); }
+    });
+  }
 
   // + sheet and Settings entries
   const sheet = $('new-sheet');

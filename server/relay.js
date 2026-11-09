@@ -52,6 +52,7 @@ const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json',
   '.mjs': 'text/javascript; charset=utf-8', '.wasm': 'application/wasm',
+  '.png': 'image/png', '.webmanifest': 'application/manifest+json',
 };
 // Transformers.js and the ONNX Runtime files it loads, served from node_modules (on-device AI)
 const VENDOR_AI = {

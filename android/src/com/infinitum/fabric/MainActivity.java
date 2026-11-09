@@ -213,7 +213,12 @@ public class MainActivity extends Activity {
     public void onBackPressed() {
         // Keep the app (and any call in progress) alive in the background, as a messenger should,
         // instead of finishing the activity and orphaning the page.
-        if (web.canGoBack()) web.goBack(); else moveTaskToBack(true);
+        // The page steps back first (sheet, dialog, chat, sub-screen); only at the chat list does Back
+        // leave the app.
+        web.evaluateJavascript("(window.fabricBack && window.fabricBack()) === true", (handled) -> {
+            if ("true".equals(handled)) return;
+            if (web.canGoBack()) web.goBack(); else moveTaskToBack(true);
+        });
     }
 
     @Override

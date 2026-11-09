@@ -1,20 +1,20 @@
-/* FabriC++™ — Infinitum house style: white, hairline rules, square corners, Arial,
+/* FabriC++™ — Infinitum house style: white, hairline rules, square corners, Helvetica Neue / Arial,
    near-black ink, small uppercase monospace labels. */
 :root {
   --bg: #ffffff;
   --panel: #ffffff;
   --panel-2: #f5f7f8;     /* fields, hovers */
   --line: #d6dce1;        /* hairline rules */
-  --line-strong: #25282c;
-  --text: #141619;        /* ink */
-  --muted: #525a5b;
+  --line-strong: #111820;
+  --text: #111820;        /* ink (Infinitum brand) */
+  --muted: #52606b;
   --faint: #8a9396;
-  --ink: #17191d;         /* buttons */
-  --accent: #141619;
+  --ink: #111820;         /* buttons */
+  --accent: #2454dd;      /* brand accent: focus and hover */
   --ok: #1f7a4d;
   --warn: #8a5a00;
   --err: #b3261e;
-  --mine: #141619;
+  --mine: #111820;
   --theirs: #f1f3f5;
   --on-ink: #ffffff;
   --chat-bg: #fafbfb;
@@ -28,7 +28,7 @@ html, body { height: 100%; margin: 0; }
 body {
   background: var(--bg);
   color: var(--text);
-  font: 15px/1.5 Arial, Helvetica, sans-serif;
+  font: 15px/1.5 "Helvetica Neue", Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 button, input, textarea { font: inherit; color: inherit; }
@@ -37,8 +37,8 @@ button, input, textarea { font: inherit; color: inherit; }
 .small { font-size: 13px; }
 .mono { font-family: var(--mono); }
 .error { color: var(--err); min-height: 1.2em; margin: 6px 0 0; }
-::selection { background: #141619; color: #fff; }
-:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+::selection { background: #111820; color: #fff; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* wordmark */
 .brand { font-weight: 400; font-size: 44px; line-height: 1; letter-spacing: -0.05em; color: var(--text); }
@@ -54,7 +54,7 @@ button, input, textarea { font: inherit; color: inherit; }
 
 /* buttons */
 .primary { background: var(--ink); color: var(--on-ink); border: 1px solid var(--line-strong); border-radius: 0; padding: 10px 18px; font-size: 13px; cursor: pointer; }
-.primary:hover { background: #000; }
+.primary:hover { background: var(--accent); border-color: var(--accent); }
 .ghost { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 0; padding: 9px 14px; font-size: 13px; cursor: pointer; }
 .ghost:hover { border-color: var(--text); }
 .link { background: none; border: 0; padding: 0; color: var(--text); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; font-size: inherit; }
@@ -448,14 +448,14 @@ mark { background: #ffe58a; color: inherit; padding: 0 1px; }
 /* ---------- dark theme (v0.17): Settings › Theme, or the system setting ---------- */
 :root[data-theme="dark"] {
   --bg: #0f1113; --panel: #15181b; --panel-2: #1d2125; --line: #2c3237; --line-strong: #c9ced3;
-  --text: #e7eaed; --muted: #a3abb1; --faint: #7d868c; --ink: #e7eaed; --on-ink: #111315; --accent: #e7eaed;
+  --text: #e7eaed; --muted: #a3abb1; --faint: #7d868c; --ink: #e7eaed; --on-ink: #111315; --accent: #8aa6ff;
   --ok: #4fbf87; --warn: #e0a83a; --err: #ef6b62; --mine: #2b3138; --theirs: #1f2327; --shadow: rgba(0,0,0,.5); --chat-bg: #0f1113; --warn-bg: #2a2214;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
   --bg: #0f1113; --panel: #15181b; --panel-2: #1d2125; --line: #2c3237; --line-strong: #c9ced3;
-  --text: #e7eaed; --muted: #a3abb1; --faint: #7d868c; --ink: #e7eaed; --on-ink: #111315; --accent: #e7eaed;
+  --text: #e7eaed; --muted: #a3abb1; --faint: #7d868c; --ink: #e7eaed; --on-ink: #111315; --accent: #8aa6ff;
   --ok: #4fbf87; --warn: #e0a83a; --err: #ef6b62; --mine: #2b3138; --theirs: #1f2327; --shadow: rgba(0,0,0,.5); --chat-bg: #0f1113; --warn-bg: #2a2214;
   color-scheme: dark;
   }
@@ -578,3 +578,6 @@ mark { background: #ffe58a; color: inherit; padding: 0 1px; }
 .num-result p { margin: 6px 0; }
 .num-found { font-weight: 600; }
 .num-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+
+/* ---------- brand pass (v0.19.1): native controls in brand ink ---------- */
+input[type="checkbox"], input[type="radio"], input[type="range"], progress { accent-color: var(--ink); }

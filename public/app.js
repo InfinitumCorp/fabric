@@ -1577,6 +1577,18 @@ function goBack() {
   closeThread();
 }
 
+/** Android's Back button (the app shell asks first): close a sheet or dialog, then step back a screen.
+ *  Returns false at the chat list, or during a call, so the shell sends the app to the background. */
+window.fabricBack = () => {
+  if (!$('call').classList.contains('hidden')) return false;
+  const open = document.querySelector('dialog[open]');
+  if (open) { open.close(); return true; }
+  if ($('app').classList.contains('hidden')) return false;
+  if (currentTab === 'chats' && !active) return false;
+  goBack();
+  return true;
+};
+
 // ---------- calls log ----------
 const CALL_RE = /\bcall\b/i;
 function renderCallLog() {

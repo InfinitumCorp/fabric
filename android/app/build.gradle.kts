@@ -24,12 +24,17 @@ android {
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
+        // Ads stay off until ADS_ENABLED is flipped to true.
+        buildConfigField("boolean", "ADS_ENABLED", "false")
+        buildConfigField("String", "ADMOB_BANNER_ID", "\"ca-app-pub-3940256099942544/6300978111\"")
     }
 
     buildTypes {
         debug {
             isMinifyEnabled = false
             isDebuggable = true
+            buildConfigField("boolean", "ADS_ENABLED", "false")
+            buildConfigField("String", "ADMOB_BANNER_ID", "\"ca-app-pub-3940256099942544/6300978111\"")
         }
         release {
             isMinifyEnabled = true
@@ -38,6 +43,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // Flip ADS_ENABLED to true to serve the real banner in release. Off until then.
+            buildConfigField("boolean", "ADS_ENABLED", "false")
+            buildConfigField("String", "ADMOB_BANNER_ID", "\"ca-app-pub-7308175971826620/9581724893\"")
         }
     }
 
@@ -46,7 +54,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 
     packaging {
         resources {
@@ -80,6 +91,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation("com.google.android.gms:play-services-ads:24.7.0")
+    implementation("com.google.android.ump:user-messaging-platform:3.2.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

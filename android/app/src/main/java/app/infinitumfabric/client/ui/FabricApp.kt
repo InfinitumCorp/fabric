@@ -226,6 +226,20 @@ private fun Settings(model: FabricViewModel) {
         Text("On-device models listed: ${relay.modelsAvailable}.")
     }
     Text("Devices: none registered from this build.", style = MaterialTheme.typography.bodySmall)
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.weight(1f)) {
+            Text("Geo routing")
+            Text(
+                "Off by default. A peer address can be labeled on this device. Encrypted message text stays in the chat.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Switch(
+            checked = model.geoRouting,
+            onCheckedChange = model::updateGeoRouting,
+            modifier = Modifier.testTag("geo-routing"),
+        )
+    }
     PrimaryButton("Sign out", model::signOut)
 }
 

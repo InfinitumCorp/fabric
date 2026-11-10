@@ -14,9 +14,15 @@ import app.infinitumfabric.client.data.LedgerHead
 import app.infinitumfabric.client.data.LocalChat
 import app.infinitumfabric.client.data.Purpose
 import app.infinitumfabric.client.data.RelayStatus
+import app.infinitumfabric.client.domain.GeoHook
+import app.infinitumfabric.client.domain.GeoLists
+import app.infinitumfabric.client.domain.GeoRoutingSettings
+import app.infinitumfabric.client.domain.MemoryKeyValue
+import app.infinitumfabric.client.domain.hostOf
 import app.infinitumfabric.client.domain.isValidHandle
 import app.infinitumfabric.client.domain.normalizeHandle
 import app.infinitumfabric.client.domain.redact
+import app.infinitumfabric.client.domain.signInNotice
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -34,7 +40,11 @@ sealed interface Screen {
 
 class FabricViewModel(
     private val apiFactory: (String) -> FabricApi = { FabricApi(baseUrl = it) },
+    private val geoSettings: GeoRoutingSettings = GeoRoutingSettings(MemoryKeyValue()),
+    private val geoLoader: () -> GeoLists? = { null },
+    private val geoEnv: () -> String? = { System.getenv("INFINITUM_GEO_ENABLED") },
 ) : ViewModel() {
+    private val geoHook = GeoHook(geoSettings, geoEnv, geoLoader)
     var screen by mutableStateOf<Screen>(Screen.SignIn)
         private set
     var baseUrl by mutableStateOf(ApiRoutes.DEFAULT_BASE_URL)
@@ -60,6 +70,8 @@ class FabricViewModel(
     var error by mutableStateOf<String?>(null)
         private set
     var notice by mutableStateOf<String?>(null)
+        private set
+    var geoRouting by mutableStateOf(geoSettings.isEnabled())
         private set
 
     fun updateBaseUrl(value: String) {
@@ -87,8 +99,24 @@ class FabricViewModel(
             baseUrl = normalized
             signedIn = true
             screen = Screen.Chats
-            notice = "Relay health is ok. This build does not register a device."
+            val label = if (geoHook.enabled()) {
+                withContext(Dispatchers.IO) {
+                    try {
+                        geoHook.labelForHost(hostOf(normalized))
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+            } else {
+                null
+            }
+            notice = signInNotice(label)
         }
+    }
+
+    fun updateGeoRouting(enabled: Boolean) {
+        geoSettings.setEnabled(enabled)
+        geoRouting = enabled
     }
 
     fun open(next: Screen) {
@@ -178,7 +206,11 @@ class FabricViewModel(
     }
 }
 
-class FabricViewModelFactory : ViewModelProvider.Factory {
+class FabricViewModelFactory(
+    private val geoSettings: GeoRoutingSettings = GeoRoutingSettings(MemoryKeyValue()),
+    private val geoLoader: () -> GeoLists? = { null },
+) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
-    override fun <T : ViewModel> create(modelClass: Class<T>): T = FabricViewModel() as T
+    override fun <T : ViewModel> create(modelClass: Class<T>): T =
+        FabricViewModel(geoSettings = geoSettings, geoLoader = geoLoader) as T
 }

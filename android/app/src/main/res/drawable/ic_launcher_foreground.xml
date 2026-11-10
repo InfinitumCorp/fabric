@@ -1,10 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Infinitum icon: Arial Regular glyph, ink #111820 on white (icongen/rollout.mjs). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <path
-        android:fillColor="#2454DD"
-        android:pathData="M30,30h48v48h-48z" />
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#111820" android:pathData="M47.85 68.99L43.89 68.99L43.89 39.01L64.11 39.01L64.11 42.55L47.85 42.55L47.85 51.83L61.92 51.83L61.92 55.37L47.85 55.37L47.85 68.99Z" />
 </vector>

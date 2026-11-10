@@ -667,3 +667,21 @@ Current status and the open question about this branch versus the Matrix build o
 6. **Buyer side**: approved-buyer licensing, aggregation with k-anonymity or differential privacy before any sale.
 7. **Relay scale & privacy**: sybil resistance for handle registration, several relay processes sharing one database (Postgres), and per-account storage quotas.
 8. **Burner numbers, further**: real checkout and billing (Stripe or the Infinitum plan) wired to `/api/phone/bundles`, buying pool numbers from Twilio automatically when the pool runs low, a signed remote "burn all" for a lost device, and numbers outside +1.
+
+## Repository layout: two client lines
+
+This repository holds two FABRIC client lines, kept side by side:
+
+| Folder | What it is | Build |
+|---|---|---|
+| `server/relay.js`, `public/`, `shared/` | The FabriC++ relay (PQXDH v3, sealed sends) and the web client every app below loads | `npm start`, `npm test` |
+| `android/` | FabriC++ for Android: a small Java WebView shell around the web client, no Gradle. This is the APK on infinitumfabric.app | `bash android/build.sh` (`FABRIC_RELEASE=1` for a signed release) |
+| `desktop/` | FabriC++ for Windows and macOS (Electron shell) | see `desktop/` |
+| `android-native/` | The native Kotlin Android client from the Matrix track (merged into `main` in #11), with Sign in with Cumulus://ID (#17) | `cd android-native && ./gradlew assembleDebug`; see `android-native/README.md` |
+| `app/` | The Expo (React Native) mobile app from the same track (#8) | see `app/` |
+| `server/docker-compose.yml` | Local Synapse dev server for the Matrix track | see `PROGRESS.md` |
+| `landing/` | Public landing page (#12) | Wrangler |
+
+CI: `.github/workflows/relay.yml` runs `npm test`; `.github/workflows/android.yml` builds `android-native/`.
+
+No licence file has been added. Infinitum Corporation has not chosen a licence for this repository.

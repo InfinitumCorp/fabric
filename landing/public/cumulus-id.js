@@ -13,11 +13,14 @@
  *   2. /api/id/redeem (+verifier) -> back here with #cid_token&profile&state
  * The token stays in this tab's sessionStorage. Pages can listen for the "cumulus-id" event on
  * window (event.detail = { cid, username, email, name } or null) and use window.CumulusID:
- * { profile(), token(), signIn(), signOut() }.
+ * { profile(), token(), signIn(), create(), signOut() }.
+ * Signed out, it shows "Sign in with Cumulus ID" and "Create a Cumulus ID" (the same authorize
+ * call with prompt=create; the person comes back here signed in either way).
+ * The issuer is data-issuer (or data-id) so a Russia-reachable mirror can be dropped in.
  */
 (() => {
   const script = document.currentScript;
-  const ID = (script && script.dataset.id) || "https://id.cumuluscloud.app";
+  const ID = (script && (script.dataset.issuer || script.dataset.id)) || "https://id.cumuluscloud.app";
   const CLIENT = (script && script.dataset.client) || "infinitum";
   const KEY = `cumulus-id:${CLIENT}`;
   const PENDING = `${KEY}:pending`;
@@ -32,13 +35,15 @@
   const here = () => { const u = new URL(location.href); u.hash = ""; u.searchParams.delete("code"); u.searchParams.delete("state"); return u.toString(); };
   const go = (path, params) => { const u = new URL(path, ID); u.search = new URLSearchParams(params).toString(); location.assign(u.toString()); };
 
-  async function signIn() {
+  async function signIn(opts) {
     const verifier = random(48);
     const challenge = b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
     const state = random(16);
     const redirect = here();
     store.set(PENDING, { verifier, state, redirect, scroll: scrollY });
-    go("/api/id/authorize", { client_id: CLIENT, redirect_uri: redirect, code_challenge: challenge, code_challenge_method: "S256", state });
+    const params = { client_id: CLIENT, redirect_uri: redirect, code_challenge: challenge, code_challenge_method: "S256", state };
+    if (opts && opts.create) params.prompt = "create";
+    go("/api/id/authorize", params);
   }
 
   function signOut() {
@@ -103,7 +108,8 @@
         who.title = `Signed in with Cumulus://ID as ${who.textContent}`;
         wrap.append(who, button("Sign out", signOut));
       } else {
-        wrap.append(button(host.dataset.label || "Sign in with Cumulus://ID", signIn));
+        wrap.append(button(host.dataset.label || "Sign in with Cumulus ID", () => signIn()));
+        wrap.append(button("Create a Cumulus ID", () => signIn({ create: true })));
         if (error) { const e = document.createElement("span"); e.className = "cid-err"; e.setAttribute("role", "alert"); e.textContent = error; wrap.append(e); }
       }
       host.replaceChildren(wrap);
@@ -111,7 +117,7 @@
     window.dispatchEvent(new CustomEvent("cumulus-id", { detail: s ? s.profile : null }));
   }
 
-  window.CumulusID = { profile: () => (current() || {}).profile || null, token: () => (current() || {}).token || null, signIn, signOut };
+  window.CumulusID = { profile: () => (current() || {}).profile || null, token: () => (current() || {}).token || null, signIn, create: () => signIn({ create: true }), signOut };
 
   const style = document.createElement("style");
   style.textContent = CSS;

@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.infinitumfabric.client",
+      "sha256_cert_fingerprints": [
+        "84:75:40:37:86:67:F5:E0:62:C0:F6:3C:66:6B:0A:14:AF:CF:42:D9:6E:01:C3:44:B4:38:56:DF:E3:AF:7D:36"
+      ]
+    }
+  }
+]

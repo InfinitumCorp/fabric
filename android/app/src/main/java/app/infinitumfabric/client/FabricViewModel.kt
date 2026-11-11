@@ -8,12 +8,16 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import app.infinitumfabric.client.data.ApiRoutes
 import app.infinitumfabric.client.data.BaseUrlPolicy
+import app.infinitumfabric.client.data.CidProfile
+import app.infinitumfabric.client.data.CumulusId
 import app.infinitumfabric.client.data.EconomyPreview
 import app.infinitumfabric.client.data.FabricApi
 import app.infinitumfabric.client.data.LedgerHead
 import app.infinitumfabric.client.data.LocalChat
 import app.infinitumfabric.client.data.Purpose
+import app.infinitumfabric.client.data.MemorySessionStore
 import app.infinitumfabric.client.data.RelayStatus
+import app.infinitumfabric.client.data.SessionStore
 import app.infinitumfabric.client.domain.isValidHandle
 import app.infinitumfabric.client.domain.normalizeHandle
 import app.infinitumfabric.client.domain.redact
@@ -34,6 +38,8 @@ sealed interface Screen {
 
 class FabricViewModel(
     private val apiFactory: (String) -> FabricApi = { FabricApi(baseUrl = it) },
+    private val cid: CumulusId = CumulusId(cidConfig()),
+    private val store: SessionStore = MemorySessionStore(),
 ) : ViewModel() {
     var screen by mutableStateOf<Screen>(Screen.SignIn)
         private set
@@ -61,6 +67,67 @@ class FabricViewModel(
         private set
     var notice by mutableStateOf<String?>(null)
         private set
+    var profile by mutableStateOf<CidProfile?>(null)
+        private set
+    var showAdvanced by mutableStateOf(false)
+        private set
+
+    init {
+        val saved = store.loadSession()
+        if (saved != null && saved.isLive()) {
+            profile = saved.profile
+            signedIn = true
+            screen = Screen.Chats
+        } else if (saved != null) {
+            store.saveSession(null)
+        }
+    }
+
+    val cidIssuer: String get() = cid.config.issuer
+
+    /**
+     * Starts "Sign in with Cumulus ID". Returns the authorize URL for the Custom Tab.
+     * [create] opens the IdP's "Create a Cumulus ID" page first; it returns here signed in either way.
+     */
+    fun beginCidSignIn(create: Boolean = false): String {
+        error = null
+        notice = null
+        val pending = cid.newPending()
+        store.savePending(pending)
+        return cid.authorizeUrl(pending, create)
+    }
+
+    /** Handles the return from Cumulus ID. Returns false when [uri] is not a Cumulus ID return. */
+    fun handleCidReturn(uri: String): Boolean {
+        val back = CumulusId.parseReturn(uri, cid.config) ?: return false
+        val pending = store.loadPending()
+        store.savePending(null)
+        if (back.error.isNotEmpty()) {
+            error = "Cumulus ID sign-in was not completed."
+            return true
+        }
+        if (pending == null || back.state.isEmpty() || back.state != pending.state || back.code.isEmpty()) {
+            error = "That sign-in didn't match. Please try again."
+            return true
+        }
+        launch {
+            val session = withContext(Dispatchers.IO) { cid.redeem(pending, back.code) }
+            store.saveSession(session)
+            profile = session.profile
+            signedIn = true
+            screen = Screen.Chats
+            notice = "Signed in with Cumulus ID as ${session.profile.display}."
+        }
+        return true
+    }
+
+    fun reportNoBrowser() {
+        error = "No browser is installed to open Cumulus ID."
+    }
+
+    fun toggleAdvanced() {
+        showAdvanced = !showAdvanced
+    }
 
     fun updateBaseUrl(value: String) {
         baseUrl = value
@@ -70,12 +137,8 @@ class FabricViewModel(
         handle = value
     }
 
-    fun continueFromSignIn() {
-        val typed = handle.trim()
-        if (typed.isNotEmpty() && !isValidHandle(typed)) {
-            error = "Handle must look like @name.veil"
-            return
-        }
+    /** Advanced setting: checks a different relay's health and uses it. Not part of signing in. */
+    fun checkRelay() {
         val typedUrl = baseUrl
         launch {
             val normalized = BaseUrlPolicy.httpsOnly.normalize(typedUrl)
@@ -85,8 +148,6 @@ class FabricViewModel(
                 return@launch
             }
             baseUrl = normalized
-            signedIn = true
-            screen = Screen.Chats
             notice = "Relay health is ok. This build does not register a device."
         }
     }
@@ -124,6 +185,13 @@ class FabricViewModel(
     }
 
     fun signOut() {
+        val session = store.loadSession()
+        store.saveSession(null)
+        store.savePending(null)
+        if (session != null) {
+            viewModelScope.launch(Dispatchers.IO) { runCatching { cid.signOut(session.token) } }
+        }
+        profile = null
         signedIn = false
         chats = emptyList()
         purposes = emptyList()
@@ -178,7 +246,13 @@ class FabricViewModel(
     }
 }
 
-class FabricViewModelFactory : ViewModelProvider.Factory {
+fun cidConfig() = app.infinitumfabric.client.data.CidConfig(
+    issuer = BuildConfig.CID_ISSUER,
+    clientId = BuildConfig.CID_CLIENT,
+    redirectUri = BuildConfig.CID_REDIRECT,
+)
+
+class FabricViewModelFactory(private val store: SessionStore) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
-    override fun <T : ViewModel> create(modelClass: Class<T>): T = FabricViewModel() as T
+    override fun <T : ViewModel> create(modelClass: Class<T>): T = FabricViewModel(store = store) as T
 }

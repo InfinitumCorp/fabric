@@ -28,14 +28,19 @@ data class CidConfig(
     val issuer: String,
     val clientId: String,
     val redirectUri: String,
+    /** Tried in order when [issuer] does not answer (e.g. Cloudflare stalls on some Russian networks). */
+    val fallbackIssuers: List<String> = listOf(RU_ISSUER),
 ) {
     init {
         require(issuer.startsWith("https://")) { "Cumulus ID issuer must be HTTPS" }
+        require(fallbackIssuers.all { it.startsWith("https://") }) { "Cumulus ID fallback issuers must be HTTPS" }
         require(redirectUri.startsWith("https://")) { "Cumulus ID redirect must be HTTPS" }
     }
 
     companion object {
         const val DEFAULT_ISSUER = "https://id.cumuluscloud.app"
+        /** Same Cumulus ID, served from a host that is reachable in Russia without a VPN. */
+        const val RU_ISSUER = "https://ru.id.cumuluscloud.app"
         const val DEFAULT_CLIENT = "fabric"
         const val DEFAULT_REDIRECT = "https://infinitumfabric.app/cid/return"
         const val APP_SCHEME = "infinitumfabric"
@@ -67,7 +72,36 @@ class CumulusId(
     private val http: OkHttpClient = FabricApi.defaultClient(),
     private val random: SecureRandom = SecureRandom(),
 ) {
-    fun newPending(): CidPending = CidPending(verifier = randomToken(48), state = randomToken(16), issuer = config.issuer)
+    /** The issuer sign-in uses: [CidConfig.issuer], or the first fallback that answered when it did not. */
+    @Volatile
+    var activeIssuer: String = config.issuer
+        private set
+
+    /**
+     * Checks that the issuer answers and switches to the first fallback that does (blocking; call off the
+     * main thread). A host that accepts the TCP connection but never answers counts as unreachable.
+     */
+    fun pickReachableIssuer(probe: (String) -> Boolean = ::answers): String {
+        val chosen = (listOf(config.issuer) + config.fallbackIssuers).firstOrNull(probe) ?: config.issuer
+        activeIssuer = chosen
+        return chosen
+    }
+
+    private fun answers(issuer: String): Boolean = try {
+        val quick = http.newBuilder()
+            .connectTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+            .callTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
+            .followRedirects(false)
+            .build()
+        val request = Request.Builder().url(issuer.trimEnd('/') + "/").head()
+            .header("User-Agent", "FabricAndroid/0.1.0").build()
+        quick.newCall(request).execute().use { it.code in 200..499 }
+    } catch (_: Exception) {
+        false
+    }
+
+    fun newPending(): CidPending = CidPending(verifier = randomToken(48), state = randomToken(16), issuer = activeIssuer)
 
     /** The authorize URL to open in a Custom Tab. [create] asks the IdP to show "Create a Cumulus ID" first. */
     fun authorizeUrl(pending: CidPending, create: Boolean = false): String {
@@ -123,7 +157,7 @@ class CumulusId(
     /** Ends the Cumulus ID session for this app. Best effort; the local copy is already gone. */
     fun signOut(token: String) {
         val request = Request.Builder()
-            .url(config.issuer.trimEnd('/') + "/api/id/signout")
+            .url(activeIssuer.trimEnd('/') + "/api/id/signout")
             .header("Authorization", "Bearer $token")
             .header("User-Agent", "FabricAndroid/0.1.0")
             .post("{}".toRequestBody("application/json".toMediaType()))

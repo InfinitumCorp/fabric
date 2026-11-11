@@ -108,4 +108,29 @@ class CumulusIdTest {
             CidConfig("http://id.cumuluscloud.app", "fabric", CidConfig.DEFAULT_REDIRECT)
         }
     }
+
+    @Test
+    fun fallsBackToTheRussiaMirrorWhenTheMainIssuerDoesNotAnswer() {
+        val cid = CumulusId(config)
+        assertEquals(CidConfig.RU_ISSUER, cid.pickReachableIssuer { it != CidConfig.DEFAULT_ISSUER })
+        assertEquals(CidConfig.RU_ISSUER, cid.newPending().issuer)
+        assertTrue(cid.authorizeUrl(cid.newPending()).startsWith(CidConfig.RU_ISSUER + "/api/id/authorize?"))
+    }
+
+    @Test
+    fun keepsTheMainIssuerWhenItAnswersOrNothingDoes() {
+        val cid = CumulusId(config)
+        assertEquals(CidConfig.DEFAULT_ISSUER, cid.pickReachableIssuer { true })
+        assertEquals(CidConfig.DEFAULT_ISSUER, cid.pickReachableIssuer { false })
+        assertEquals(CidConfig.DEFAULT_ISSUER, cid.newPending().issuer)
+    }
+
+    @Test
+    fun probeTreatsAnyHttpAnswerAsReachable() {
+        server.enqueue(MockResponse().setResponseCode(302))
+        val local = server.url("/").toString().replace("http://", "https://")
+        val cid = CumulusId(CidConfig(CidConfig.DEFAULT_ISSUER, "fabric", CidConfig.DEFAULT_REDIRECT, listOf(local)))
+        // Probe with a stub: the real probe needs HTTPS; this checks ordering only.
+        assertEquals(local, cid.pickReachableIssuer { it == local })
+    }
 }

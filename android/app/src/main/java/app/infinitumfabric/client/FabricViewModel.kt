@@ -73,8 +73,6 @@ class FabricViewModel(
         private set
 
     init {
-        // Pick a Cumulus ID host that answers on this network before the person taps "Sign in".
-        viewModelScope.launch(Dispatchers.IO) { runCatching { cid.pickReachableIssuer() } }
         val saved = store.loadSession()
         if (saved != null && saved.isLive()) {
             profile = saved.profile
@@ -86,6 +84,13 @@ class FabricViewModel(
     }
 
     val cidIssuer: String get() = cid.activeIssuer
+
+    /** Picks a Cumulus ID host that works on this network before the person taps "Sign in". */
+    fun chooseCidIssuer(throttledNetwork: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { cid.pickReachableIssuer(throttledNetwork = throttledNetwork) }
+        }
+    }
 
     /**
      * Starts "Sign in with Cumulus ID". Returns the authorize URL for the Custom Tab.

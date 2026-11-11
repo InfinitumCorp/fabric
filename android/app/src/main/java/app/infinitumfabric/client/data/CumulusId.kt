@@ -44,6 +44,9 @@ data class CidConfig(
         const val DEFAULT_CLIENT = "fabric"
         const val DEFAULT_REDIRECT = "https://infinitumfabric.app/cid/return"
         const val APP_SCHEME = "infinitumfabric"
+        /** The Cumulus ID sign-in page's main script (about 75 KB), used to test a host end to end. */
+        const val SIGN_IN_SCRIPT = "/app.js"
+        const val MIN_SCRIPT_BYTES = 32 * 1024
     }
 }
 
@@ -78,25 +81,46 @@ class CumulusId(
         private set
 
     /**
-     * Checks that the issuer answers and switches to the first fallback that does (blocking; call off the
-     * main thread). A host that accepts the TCP connection but never answers counts as unreachable.
+     * Picks an issuer that can actually serve the sign-in page on this network (blocking; call off the
+     * main thread). Some Russian networks let Cloudflare answer small requests but stall every transfer
+     * after the first few kilobytes, so a host only counts when it delivers the full sign-in script.
+     * When no host passes, any host that answers at all is used, then [CidConfig.issuer].
      */
-    fun pickReachableIssuer(probe: (String) -> Boolean = ::answers): String {
-        val chosen = (listOf(config.issuer) + config.fallbackIssuers).firstOrNull(probe) ?: config.issuer
+    fun pickReachableIssuer(
+        probe: (String) -> Boolean = ::servesSignIn,
+        answersAtAll: (String) -> Boolean = ::answers,
+        throttledNetwork: Boolean = false,
+    ): String {
+        // Russian and Belarusian networks throttle Cloudflare on and off, so a probe can pass and the
+        // page still stall. There the mirrors go first (same approach as the +SPCTR app).
+        val all = if (throttledNetwork) config.fallbackIssuers + config.issuer else listOf(config.issuer) + config.fallbackIssuers
+        val chosen = all.firstOrNull(probe) ?: all.firstOrNull(answersAtAll) ?: config.issuer
         activeIssuer = chosen
         return chosen
     }
 
+    private fun quickClient(seconds: Long) = http.newBuilder()
+        .connectTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+        .callTimeout(seconds, java.util.concurrent.TimeUnit.SECONDS)
+        .followRedirects(false)
+        .build()
+
+    /** True when the issuer delivers its whole sign-in script (tens of kilobytes) within a few seconds. */
+    private fun servesSignIn(issuer: String): Boolean = try {
+        val request = Request.Builder().url(issuer.trimEnd('/') + CidConfig.SIGN_IN_SCRIPT)
+            .header("User-Agent", "FabricAndroid/0.1.0").build()
+        quickClient(8).newCall(request).execute().use { response ->
+            response.isSuccessful && (response.body?.bytes()?.size ?: 0) >= CidConfig.MIN_SCRIPT_BYTES
+        }
+    } catch (_: Exception) {
+        false
+    }
+
     private fun answers(issuer: String): Boolean = try {
-        val quick = http.newBuilder()
-            .connectTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
-            .callTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
-            .followRedirects(false)
-            .build()
         val request = Request.Builder().url(issuer.trimEnd('/') + "/").head()
             .header("User-Agent", "FabricAndroid/0.1.0").build()
-        quick.newCall(request).execute().use { it.code in 200..499 }
+        quickClient(6).newCall(request).execute().use { it.code in 200..499 }
     } catch (_: Exception) {
         false
     }

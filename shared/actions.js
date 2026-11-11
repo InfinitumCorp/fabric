@@ -10,11 +10,16 @@
 // field; `vote` by anyone in the chat, `close` by its author) and disappearing messages (a `ttl`
 // field in seconds). Older clients ignore actions and fields they don't know: they see a poll as
 // its plain-text fallback, and keep disappearing messages.
+//
+// v0.21 adds events (an `event` field; `rsvp` by anyone in the chat, `cancel` by its author, see
+// shared/events.js) and stickers (an image message with `sticker: true`).
+
+import { eventOf, applyRsvp } from './events.js';
 
 export const MAX_TEXT = 4000;
 export const MAX_QUOTE = 200;
 export const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
-const ACTS = new Set(['edit', 'delete', 'react', 'pin', 'vote', 'close']);
+const ACTS = new Set(['edit', 'delete', 'react', 'pin', 'vote', 'close', 'rsvp', 'cancel']);
 export const MAX_POLL_OPTIONS = 10;
 export const MAX_POLL_Q = 300;
 export const MAX_POLL_OPTION = 100;
@@ -55,6 +60,9 @@ export function extrasOf(payload) {
   const poll = pollOf(payload);
   if (poll) out.poll = poll;
   if (isTtl(payload?.ttl)) out.ttl = payload.ttl;
+  const event = eventOf(payload);
+  if (event) out.event = event;
+  if (payload?.sticker === true && payload?.media?.type === 'image') out.sticker = true;
   return out;
 }
 
@@ -96,13 +104,14 @@ export function expireThread(thread, now = Date.now()) {
 }
 
 /** Build an action payload. `peer` is set only on copies sent to my own other devices. */
-export function actionPayload(act, target, { text, emoji, peer, on, choices } = {}) {
+export function actionPayload(act, target, { text, emoji, peer, on, choices, going } = {}) {
   if (!ACTS.has(act) || !ID_RE.test(target)) throw new Error('bad action');
   const p = { kind: 'action', act, target };
   if (act === 'edit') p.text = clip(text, MAX_TEXT);
   if (act === 'react') p.emoji = emoji ? String(emoji) : '';
   if (act === 'pin') p.on = Boolean(on);
   if (act === 'vote') p.choices = Array.isArray(choices) ? choices : [];
+  if (act === 'rsvp') p.going = typeof going === 'string' ? going : '';
   if (peer) p.peer = peer;
   return p;
 }
@@ -140,7 +149,13 @@ export function applyAction(thread, actor, payload, ts = Date.now()) {
     if (!Object.keys(m.votes).length) delete m.votes;
     return m;
   }
-  if (m.from !== actor) return null; // only the author edits, deletes or closes a poll for everyone
+  if (payload.act === 'rsvp') return applyRsvp(m, actor, payload.going) ? m : null; // one answer per person
+  if (m.from !== actor) return null; // only the author edits, deletes, closes a poll or cancels an event for everyone
+  if (payload.act === 'cancel') {
+    if (m.deleted || !m.event || m.evCancelled) return null;
+    m.evCancelled = ts;
+    return m;
+  }
   if (payload.act === 'close') {
     if (m.deleted || !m.poll || m.pollClosed) return null;
     m.pollClosed = ts;
@@ -160,6 +175,7 @@ export function applyAction(thread, actor, payload, ts = Date.now()) {
   m.text = '';
   delete m.tr; delete m.sentTr; delete m.reactions; delete m.edited;
   delete m.poll; delete m.votes; delete m.pollClosed; delete m.pinned;
+  delete m.event; delete m.rsvp; delete m.evCancelled; delete m.sticker;
   return m;
 }
 

@@ -96,7 +96,7 @@ export function installDesk(api) {
   let folderId = store.get(FOLDER_KEY, 'all');
   const folders = () => [...BUILTIN_FOLDERS, ...(db().folders || []).map(cleanFolder).filter(Boolean)];
   const folderNow = () => folders().find((f) => f.id === folderId) || BUILTIN_FOLDERS[0];
-  const infoOf = (key) => ({ group: api.isGroupKey(key), unread: db().unread?.[key] || 0, muted: Boolean(prefs()[key]?.muted) });
+  const infoOf = (key) => ({ group: api.isGroupKey(key), unread: db().unread?.[key] || 0, muted: Boolean(prefs()[key]?.muted), fav: Boolean(prefs()[key]?.fav) });
   const matches = (key) => inFolder(folderNow(), key, infoOf(key));
   function setFolder(id) { folderId = id; store.set(FOLDER_KEY, id); api.renderContacts(); }
 

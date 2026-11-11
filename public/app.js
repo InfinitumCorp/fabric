@@ -36,6 +36,7 @@ import { avatarOf, isNewer, needsProfile, profilePayload, AVATAR_PX } from '/sha
 import { waExtrasOf, dropFromBlocked, mentionsMe } from '/shared/wa.js';
 import { installWa } from '/wa.js';
 import { installStatus } from '/status.js';
+import { installExtras } from '/extras.js';
 import { i18n } from './i18n/start.js'; // interface language: build-time catalogs, no runtime calls
 
 // ---------- local vault (keys + history stay on this device, encrypted) ----------
@@ -95,7 +96,7 @@ function persist() {
 const $ = (id) => document.getElementById(id);
 // What people wrote (messages, names, files, polls) is never run through the interface
 // translator (@infinitum/i18n); only the app's own wording is.
-const USER_TEXT = /(^|\s)(msg-text|quote-text|quote-from|contact-name|preview|pin-text|file-name|poll-label|sp-author|st-name|spoiler|bot-about|sp-ad-title)(\s|$)/;
+const USER_TEXT = /(^|\s)(msg-text|quote-text|quote-from|contact-name|preview|pin-text|file-name|poll-label|sp-author|st-name|spoiler|bot-about|sp-ad-title|ev-title|ev-place|ev-note)(\s|$)/;
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
@@ -130,6 +131,7 @@ let refSeq = 0;
 let desk = null; // desktop-class features (public/desk.js), installed before boot
 let wa = null; // location, contacts, view once, mentions, stars, blocking (public/wa.js)
 let statusUi = null; // status updates, broadcast lists, locked chats (public/status.js)
+let extras = null; // events, stickers, Favourites (public/extras.js)
 let bots = null; // bot buttons, keyboards, commands and deep links (public/bots-ui.js)
 let retry = 500;
 
@@ -622,6 +624,8 @@ async function sendText(text, tr = null, extra = null, to = active) {
     ...(g ? { group: { id: g.id, name: g.name, members: g.members } } : {}),
     ...(extra.silent ? { silent: true } : {}),
     ...(extra.poll ? { poll: extra.poll } : {}),
+    ...(extra.event ? { event: extra.event } : {}),
+    ...(extra.sticker && media?.type === 'image' ? { sticker: true } : {}),
     ...(extra.loc ? { loc: extra.loc } : {}), ...(extra.card ? { card: extra.card } : {}),
     ...(extra.once && media?.type === 'image' ? { once: true } : {}),
     ...(isTtl(prefsOf()[to]?.ttl) ? { ttl: prefsOf()[to].ttl } : {}),
@@ -1084,6 +1088,8 @@ function previewOf(key, last) {
   if (last.once) return who + 'View-once photo';
   if (last.loc) return who + '📍 ' + (last.loc.label || 'Location');
   if (last.card) return who + '👤 Contact';
+  if (last.sticker) return who + 'Sticker';
+  if (last.event) return who + '📅 ' + last.event.title + (last.evCancelled ? ' (cancelled)' : '');
   return who + mediaLabel(last.media, plainText(text));
 }
 function renderContacts() {
@@ -1238,7 +1244,7 @@ function renderMessages() {
     if (day !== lastDay) { ol.append(el('li', 'day-sep', dayLabel(m.ts))); lastDay = day; }
     if (m.from === '@system') { ol.append(el('li', 'sysline', m.text)); continue; }
     const mine = m.from === db.handle;
-    const li = el('li', 'msg' + (mine ? ' mine' : '') + (m.status?.startsWith('failed') ? ' failed' : '') + (m.deleted ? ' deleted' : ''));
+    const li = el('li', 'msg' + (mine ? ' mine' : '') + (m.status?.startsWith('failed') ? ' failed' : '') + (m.deleted ? ' deleted' : '') + (m.sticker && m.media && !m.deleted ? ' sticker-msg' : ''));
     li.dataset.id = m.id;
     li.tabIndex = 0;
     bindMessageMenu(li, m);
@@ -1269,7 +1275,9 @@ function renderMessages() {
     const shown = flipped ? m.sentTr.text : translated ? m.tr.text : m.text;
     if (q && shown.toLowerCase().includes(q)) { { const t = el('span', 'msg-text'); t.append(...highlighted(shown, q, 'msg-text').childNodes); li.append(t); } li.classList.add('hit'); hits++; lastHit = li; }
     else if (wa?.renderBody(li, m)) { /* a location or contact card */ }
+    else if (m.event && extras) extras.renderEvent(li, m);
     else if (m.poll && desk) desk.renderPoll(li, m);
+    else if (m.sticker && m.media) { /* the sticker itself is the message */ }
     else if (desk) { const t = el('span', 'msg-text'); desk.formatInto(t, shown); wa?.markMentions(t); li.append(t); }
     else li.append(el('span', 'msg-text', shown));
     const time = new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -1995,10 +2003,11 @@ function openMsgMenu(m, li) {
     react.append(b);
   }
   react.classList.toggle('hidden', Boolean(m.deleted));
-  const show = { reply: !m.deleted, copy: !m.deleted && Boolean(m.text), forward: !m.deleted && (Boolean(m.text) || Boolean(m.media?.data)), edit: mine && !m.deleted && Boolean(m.text) && !m.poll, 'delete-all': mine && !m.deleted, 'delete-me': true };
+  const show = { reply: !m.deleted, copy: !m.deleted && Boolean(m.text), forward: !m.deleted && (Boolean(m.text) || Boolean(m.media?.data)), edit: mine && !m.deleted && Boolean(m.text) && !m.poll && !m.event, 'delete-all': mine && !m.deleted, 'delete-me': true };
   for (const [k, on] of Object.entries(show)) $(`msg-${k}`).classList.toggle('hidden', !on);
   desk?.onMsgMenu(m);
   wa?.onMsgMenu(m);
+  extras?.onMsgMenu(m);
   menu.classList.remove('hidden');
   // next to the message, kept on screen
   const r = li.getBoundingClientRect();
@@ -2226,6 +2235,7 @@ function openChatMenu(key, li) {
   $('chat-delete').textContent = isGroupKey(key) && inGroup(groupFor(key)) ? 'Leave and delete group' : 'Delete chat';
   wa?.onChatMenu(key);
   statusUi?.onChatMenu(key);
+  extras?.onChatMenu(key);
   const menu = $('chat-menu');
   menu.classList.remove('hidden');
   const rc = li.getBoundingClientRect();
@@ -3626,6 +3636,12 @@ wa = installWa({
   $, el, toast, SAVED, db: () => db, active: () => active, persist, userPrefs, sendText: (...a) => sendText(...a),
   sendAttachment: (...a) => sendAttachment(...a), renderMessages, renderContacts, chatKeys, chatName, isGroupKey, groupFor,
   avatarEl, addContact, openThread, jumpTo, systemLine, growText, setMyAbout,
+  menuMsg: () => menuMsg, closeMsgMenu, menuChat: () => menuChat, closeChatMenu,
+  openEvent: (to) => extras?.openEvent(to), openStickers: (to) => extras?.openStickers(to),
+});
+extras = installExtras({
+  $, el, toast, db: () => db, active: () => active, persist, prefsOf, setChatPref,
+  sendText: (...a) => sendText(...a), sendAction: (...a) => sendAction(...a),
   menuMsg: () => menuMsg, closeMsgMenu, menuChat: () => menuChat, closeChatMenu,
 });
 statusUi = installStatus({

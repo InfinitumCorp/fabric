@@ -395,7 +395,7 @@ npm run smoke       # end-to-end check against a local relay on :8795 (sign-in, 
 
 FabriC++'s answer to what the big desktop messengers offer, checked feature by feature in [docs/desktop-parity.md](docs/desktop-parity.md). Built in `public/desk.js` (page) and `shared/desk.js` (tested logic), so the web client, the desktop app and the Android app all get them. The encrypted protocol gains only optional fields and actions that older clients ignore: `silent`, `poll`, `ttl`, the `pin`, `vote` and `close` actions, and a `chat_ttl` control message.
 
-- **Chat folders.** All, Unread, Personal and Groups over the chat list, plus up to 10 of your own (by kind of chat and by chosen chats, optionally leaving muted ones out). `Ctrl+1…9` switches.
+- **Chat folders.** All, Unread, Favourites, Personal and Groups over the chat list (Add to Favourites is in each chat's menu), plus up to 10 of your own (by kind of chat and by chosen chats, optionally leaving muted ones out). `Ctrl+1…9` switches.
 - **Saved messages.** Notes to yourself (`Ctrl+0`, the bookmark in the sidebar, or forward anything into it). Kept on this device, in backups and in the history copied to a linked device.
 - **Drafts** stay with each chat when you switch or restart, shown as "Draft:" in the list.
 - **Send without sound and scheduled messages.** Hold or right-click Send. A silent message reaches the other side without an alert; a scheduled one is sent by this device when it's due (the desktop app keeps running in the tray).
@@ -404,6 +404,8 @@ FabriC++'s answer to what the big desktop messengers offer, checked feature by f
 - **Navigation.** Jump to date (`Ctrl+J`), previous/next chat (`Alt+↑/↓`), edit your last message (`↑` in an empty box), and the full list on `Ctrl+/`.
 - **Pinned messages.** Pin any message for everyone in the chat (right-click › Pin); a bar over the chat shows the latest pin and steps through the others.
 - **Polls.** New poll in the chat menu: a question, 2–10 options, one answer or several. Votes travel encrypted and everyone in the chat can see them; results show once you've voted, and the author can stop the poll. Older apps see the poll as text.
+- **Events.** Event in the attach sheet: a name, start and optional end, place and details. Everyone in the chat answers Going, Maybe or Can't go (encrypted, visible to the chat) and can save it to their calendar as an `.ics` file; the author can cancel it. Older apps see the event as text with the time in UTC.
+- **Stickers.** Sticker in the attach sheet opens your tray (up to 40, kept in your encrypted vault): make one from a photo (fitted into 320 px, WebP), or save one someone sends you from its menu. Stickers arrive as end-to-end encrypted images without a bubble; older apps show them as photos.
 - **Disappearing messages.** Per chat, from 1 hour to 1 month, set for both sides. Every FabriC++ device removes a message when its time is up; older apps keep them, and the app says so.
 - **Export a chat** to a web page, plain text or JSON, decrypted on this device (photos and files optional).
 - **Notifications.** Mute a chat for 1 hour, 8 hours, a day, a week or always; a chime on or off; previews with the name and message, the name only, or nothing.

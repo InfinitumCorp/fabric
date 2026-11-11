@@ -10,6 +10,7 @@ export const SAVED = '~saved';
 export const BUILTIN_FOLDERS = [
   { id: 'all', name: 'All' },
   { id: 'unread', name: 'Unread' },
+  { id: 'favourites', name: 'Favourites' },
   { id: 'personal', name: 'Personal' },
   { id: 'groups', name: 'Groups' },
 ];
@@ -23,6 +24,7 @@ export const FOLDER_ID_RE = /^f[a-z0-9]{6,16}$/;
 export function inFolder(folder, key, info = {}) {
   if (!folder || folder.id === 'all') return true;
   if (folder.id === 'unread') return Boolean(info.unread);
+  if (folder.id === 'favourites') return Boolean(info.fav);
   if (folder.id === 'personal') return !info.group && key !== SAVED;
   if (folder.id === 'groups') return Boolean(info.group);
   if (folder.exclude?.includes(key)) return false;

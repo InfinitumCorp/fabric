@@ -51,6 +51,8 @@ export function installWa(api) {
     item('Location', 'Your current spot, once', () => shareLocation(to));
     item('Contact', 'Share someone’s handle', () => shareContact(to));
     if ($('poll-btn')) item('Poll', 'Ask the chat to vote', () => $('poll-btn').click());
+    if (api.openEvent) item('Event', 'Plan something, collect answers', () => api.openEvent(to));
+    if (api.openStickers) item('Sticker', 'From your sticker tray', () => api.openStickers(to));
     d.append(grid, actions(button('Cancel', 'ghost', () => d.close())));
     d.showModal();
   }

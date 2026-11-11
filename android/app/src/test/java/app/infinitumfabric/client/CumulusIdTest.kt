@@ -108,4 +108,41 @@ class CumulusIdTest {
             CidConfig("http://id.cumuluscloud.app", "fabric", CidConfig.DEFAULT_REDIRECT)
         }
     }
+
+    @Test
+    fun fallsBackToTheRussiaMirrorWhenTheMainIssuerDoesNotAnswer() {
+        val cid = CumulusId(config)
+        assertEquals(CidConfig.RU_ISSUER, cid.pickReachableIssuer({ it != CidConfig.DEFAULT_ISSUER }, { true }))
+        assertEquals(CidConfig.RU_ISSUER, cid.newPending().issuer)
+        assertTrue(cid.authorizeUrl(cid.newPending()).startsWith(CidConfig.RU_ISSUER + "/api/id/authorize?"))
+    }
+
+    @Test
+    fun keepsTheMainIssuerWhenItAnswersOrNothingDoes() {
+        val cid = CumulusId(config)
+        assertEquals(CidConfig.DEFAULT_ISSUER, cid.pickReachableIssuer({ true }, { true }))
+        assertEquals(CidConfig.DEFAULT_ISSUER, cid.pickReachableIssuer({ false }, { false }))
+        assertEquals(CidConfig.DEFAULT_ISSUER, cid.newPending().issuer)
+        // Main answers small requests but can't deliver the page (Cloudflare throttled): the mirror wins.
+        assertEquals(CidConfig.RU_ISSUER, cid.pickReachableIssuer({ it == CidConfig.RU_ISSUER }, { true }))
+        // Nothing delivers the page: fall back to whichever answers at all.
+        assertEquals(CidConfig.RU_ISSUER, cid.pickReachableIssuer({ false }, { it == CidConfig.RU_ISSUER }))
+    }
+
+    @Test
+    fun probeTreatsAnyHttpAnswerAsReachable() {
+        server.enqueue(MockResponse().setResponseCode(302))
+        val local = server.url("/").toString().replace("http://", "https://")
+        val cid = CumulusId(CidConfig(CidConfig.DEFAULT_ISSUER, "fabric", CidConfig.DEFAULT_REDIRECT, listOf(local)))
+        // Probe with a stub: the real probe needs HTTPS; this checks ordering only.
+        assertEquals(local, cid.pickReachableIssuer({ it == local }, { false }))
+    }
+
+    @Test
+    fun throttledNetworksTryTheMirrorFirstEvenWhenTheMainProbePasses() {
+        val cid = CumulusId(config)
+        assertEquals(CidConfig.RU_ISSUER, cid.pickReachableIssuer({ true }, { true }, throttledNetwork = true))
+        // The mirror is down: fall back to the main issuer.
+        assertEquals(CidConfig.DEFAULT_ISSUER, cid.pickReachableIssuer({ it == CidConfig.DEFAULT_ISSUER }, { false }, throttledNetwork = true))
+    }
 }

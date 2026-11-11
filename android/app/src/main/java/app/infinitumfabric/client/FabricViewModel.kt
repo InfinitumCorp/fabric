@@ -83,7 +83,14 @@ class FabricViewModel(
         }
     }
 
-    val cidIssuer: String get() = cid.config.issuer
+    val cidIssuer: String get() = cid.activeIssuer
+
+    /** Picks a Cumulus ID host that works on this network before the person taps "Sign in". */
+    fun chooseCidIssuer(throttledNetwork: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { cid.pickReachableIssuer(throttledNetwork = throttledNetwork) }
+        }
+    }
 
     /**
      * Starts "Sign in with Cumulus ID". Returns the authorize URL for the Custom Tab.

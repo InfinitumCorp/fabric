@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.telephony.TelephonyManager
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -21,7 +22,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
-        if (savedInstanceState == null) handleReturn(intent)
+        if (savedInstanceState == null) {
+            model.chooseCidIssuer(throttledNetwork = throttledCountry())
+            handleReturn(intent)
+        }
         setContent {
             FabricTheme {
                 FabricApp(model, openCumulusId = ::openCumulusId)
@@ -41,6 +45,14 @@ class MainActivity : ComponentActivity() {
             // Do not process the same code twice after a configuration change.
             setIntent(Intent(this, MainActivity::class.java))
         }
+    }
+
+    /** True when the mobile network or the SIM is Russian or Belarusian (Cloudflare is throttled there). */
+    private fun throttledCountry(): Boolean = try {
+        val tm = getSystemService(TELEPHONY_SERVICE) as? TelephonyManager
+        listOfNotNull(tm?.networkCountryIso, tm?.simCountryIso).any { it.equals("ru", true) || it.equals("by", true) }
+    } catch (_: Exception) {
+        false
     }
 
     /** Opens Cumulus ID in a Custom Tab (falls back to the default browser). */

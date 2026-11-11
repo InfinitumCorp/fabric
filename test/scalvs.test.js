@@ -242,6 +242,21 @@ test('Scalvs end to end: text +scalvs, it runs the task and replies, end-to-end 
     const r2 = await textScalvs(relay.port, amy, 'reminders');
     assert.match(r2.text, /stretch/);
   });
+
+  await t.test('Scalvs with lost keys gets +scalvs.veil back on restart', async () => {
+    const before = relay.scalvs.accountKey;
+    amy.session.c.close();
+    await relay.close();
+    fs.rmSync(stateFile); // the keys are gone: Scalvs makes new ones
+    relay = await createRelay({ port: 0, dataFile: path.join(dir, 'fabric.db'), log: () => {}, scalvs: { stateFile, ai } });
+    const signedIn = await Promise.race([relay.scalvsReady.then(() => true), new Promise((r) => setTimeout(() => r(false), 10_000))]);
+    assert.ok(signedIn, 'the new Scalvs signs in instead of hitting "handle taken"');
+    assert.notDeepEqual(relay.scalvs.accountKey, before);
+    const squatter = await newAccount(SCALVS_HANDLE);
+    const { c, error } = await signIn(relay.port, squatter);
+    assert.equal(error, 'handle taken', 'and the address is still not up for grabs');
+    c.close();
+  });
 });
 
 test('Scalvs off: the handle stays reserved and the API says so', async (t) => {

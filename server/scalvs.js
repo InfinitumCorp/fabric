@@ -277,6 +277,8 @@ export async function createScalvs({ stateFile = null, ai = null, log = console.
     handle: me.handle,
     deviceId: me.deviceId,
     accountKey: state.account.publicJwk,
+    /** Scalvs's signed device list (public keys only). */
+    list: state.list,
     /** Sign in to the relay at this http(s) URL; resolves once registered. */
     start(url, wsOptions = {}) {
       ai?.warm?.()?.catch(() => {}); // fetch and load an open model before the first AI task, not during it

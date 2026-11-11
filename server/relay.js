@@ -262,6 +262,17 @@ export async function createRelay({
     }
   }
 
+  // +scalvs.veil belongs to the Scalvs this relay runs. If Scalvs's keys were lost and made anew (a
+  // missing or replaced scalvs.json), the stored account still carries the old key and Scalvs could
+  // never sign in again: give the address to the current keys. Its old devices are dropped.
+  if (bot) {
+    const cur = store.getList(SCALVS_HANDLE);
+    if (cur && !isScalvsAccount(bot, cur.payload.account)) {
+      applyList(SCALVS_HANDLE, bot.list);
+      log('[scalvs] +scalvs.veil moved to the current Scalvs keys (the stored account key was from an earlier, lost identity)');
+    }
+  }
+
   /** An error when a new list adds devices beyond the plan (lists already over it may shrink). */
   function tooManyDevices(handle, cur, next) {
     const max = entitlements(handle).devices;

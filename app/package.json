@@ -19,5 +19,27 @@
   "devDependencies": {
     "@types/react": "~19.0.0",
     "typescript": "~5.8.0"
+  },
+  "overrides": {
+    "ajv": "8.18.0",
+    "@xmldom/xmldom": "0.8.15",
+    "image-size": "2.0.3",
+    "uuid": "11.1.1",
+    "@expo/cli": {
+      "glob": "14.0.2"
+    },
+    "@expo/fingerprint": {
+      "glob": "14.0.2",
+      "minimatch": "11.0.1"
+    },
+    "@expo/config": {
+      "glob": "14.0.2"
+    },
+    "@expo/config-plugins": {
+      "glob": "14.0.2"
+    },
+    "sucrase": {
+      "glob": "14.0.2"
+    }
   }
 }

@@ -6,7 +6,7 @@ on:
     paths: ["core/**", ".github/workflows/core.yml"]
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     defaults:
       run:
         working-directory: core

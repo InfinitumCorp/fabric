@@ -9,3 +9,9 @@ Public access: the account-wide "All Workers" Cloudflare Access app gates every 
 ```sh
 npx wrangler deploy
 ```
+
+## Cumulus ID
+
+- Header: `cumulus-id.js` (client `fabric`, `data-issuer` for a mirror) shows **Sign in with Cumulus ID** and **Create a Cumulus ID**.
+- `/cid/return` (Android app) and `/cid/rn` (React Native app): the IdP's redirect for the apps; they hand `code`/`state` to the app's scheme.
+- `/.well-known/assetlinks.json`: verifies the Android App Link for `app.infinitumfabric.client` (release key SHA-256). After deploy, check it is served as JSON at `https://infinitumfabric.app/.well-known/assetlinks.json`.

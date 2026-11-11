@@ -1,6 +1,7 @@
 package app.infinitumfabric.client.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +18,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -33,7 +35,7 @@ import app.infinitumfabric.client.Screen
 import app.infinitumfabric.client.domain.formatUsdFromCents
 
 @Composable
-fun FabricApp(model: FabricViewModel) {
+fun FabricApp(model: FabricViewModel, openCumulusId: (create: Boolean) -> Unit = {}) {
     BackHandler(enabled = model.screen !is Screen.SignIn && model.screen !is Screen.Chats) {
         model.back()
     }
@@ -56,7 +58,7 @@ fun FabricApp(model: FabricViewModel) {
             model.notice?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             HorizontalDivider(color = Line, thickness = 1.dp)
             when (val screen = model.screen) {
-                Screen.SignIn -> SignIn(model)
+                Screen.SignIn -> SignIn(model, openCumulusId)
                 Screen.Chats -> Chats(model)
                 is Screen.Conversation -> Conversation(model, screen.handle)
                 Screen.NewChat -> NewChat(model)
@@ -79,34 +81,52 @@ fun LockedScreen() {
 }
 
 @Composable
-private fun SignIn(model: FabricViewModel) {
+private fun SignIn(model: FabricViewModel, openCumulusId: (create: Boolean) -> Unit) {
     Text("Sign in", style = MaterialTheme.typography.titleMedium)
     Text(
-        "No password is stored in the app. Continue checks the relay health endpoint. " +
-            "Account registration needs a signed device list, which this build does not create.",
+        "FabriC++ signs you in with your Cumulus ID. No password is stored in the app.",
         style = MaterialTheme.typography.bodySmall,
     )
-    OutlinedTextField(
-        value = model.baseUrl,
-        onValueChange = model::updateBaseUrl,
+    Button(
+        onClick = { openCumulusId(false) },
+        enabled = !model.busy,
         modifier = Modifier
             .fillMaxWidth()
-            .testTag("homeserver"),
-        label = { Text("Relay") },
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-    )
-    OutlinedTextField(
-        value = model.handle,
-        onValueChange = model::updateHandle,
+            .testTag("cid-sign-in"),
+        shape = MaterialTheme.shapes.small,
+        colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Paper),
+    ) { Text("Sign in with Cumulus ID") }
+    OutlinedButton(
+        onClick = { openCumulusId(true) },
+        enabled = !model.busy,
         modifier = Modifier
             .fillMaxWidth()
-            .testTag("handle"),
-        label = { Text("Handle, optional") },
-        placeholder = { Text("@name.veil") },
-        singleLine = true,
+            .testTag("cid-create"),
+        shape = MaterialTheme.shapes.small,
+        border = BorderStroke(1.dp, Ink),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink),
+    ) { Text("Create a Cumulus ID") }
+    Text(
+        "No Cumulus ID yet? Create one in the same step. You come back here signed in.",
+        style = MaterialTheme.typography.bodySmall,
     )
-    PrimaryButton("Continue", model::continueFromSignIn, enabled = !model.busy)
+    TextButton(onClick = model::toggleAdvanced, modifier = Modifier.testTag("advanced")) {
+        Text(if (model.showAdvanced) "Hide advanced" else "Advanced", color = Accent)
+    }
+    if (model.showAdvanced) {
+        OutlinedTextField(
+            value = model.baseUrl,
+            onValueChange = model::updateBaseUrl,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("homeserver"),
+            label = { Text("Relay") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+        )
+        TextButton(onClick = model::checkRelay, enabled = !model.busy) { Text("Check relay", color = Accent) }
+        Text("Cumulus ID ${model.cidIssuer}", style = MaterialTheme.typography.bodySmall)
+    }
 }
 
 @Composable
@@ -213,6 +233,7 @@ private fun Data(model: FabricViewModel) {
 private fun Settings(model: FabricViewModel) {
     NavRow(model)
     Text("Settings", style = MaterialTheme.typography.titleMedium)
+    model.profile?.let { Text("Signed in with Cumulus ID as ${it.display}.") }
     Text("Relay ${model.baseUrl}", style = MaterialTheme.typography.bodySmall)
     val ledger = model.ledger
     val relay = model.relay

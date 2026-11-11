@@ -24,6 +24,28 @@ android {
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
+        // Cumulus ID. Override with -PcidIssuer=https://<mirror> for a Russia-reachable issuer.
+        val cidIssuer = (project.findProperty("cidIssuer") as String?) ?: "https://id.cumuluscloud.app"
+        require(cidIssuer.startsWith("https://")) { "cidIssuer must be HTTPS" }
+        buildConfigField("String", "CID_ISSUER", "\"$cidIssuer\"")
+        buildConfigField("String", "CID_CLIENT", "\"fabric\"")
+        buildConfigField("String", "CID_REDIRECT", "\"https://infinitumfabric.app/cid/return\"")
+    }
+
+    // Release signing: keystore and password files stay outside the repo.
+    // -PfabricKeystore=<path to .jks> -PfabricStorePassFile=<path to password file> (key password = store password).
+    val releaseKeystore = (project.findProperty("fabricKeystore") as String?)?.let { file(it) }
+    val releasePassFile = (project.findProperty("fabricStorePassFile") as String?)?.let { file(it) }
+    if (releaseKeystore != null && releasePassFile != null && releaseKeystore.exists() && releasePassFile.exists()) {
+        signingConfigs {
+            create("release") {
+                val pass = releasePassFile.readText().trim()
+                storeFile = releaseKeystore
+                storePassword = pass
+                keyAlias = (project.findProperty("fabricKeyAlias") as String?) ?: "fabric"
+                keyPassword = pass
+            }
+        }
     }
 
     buildTypes {
@@ -32,6 +54,7 @@ android {
             isDebuggable = true
         }
         release {
+            signingConfigs.findByName("release")?.let { signingConfig = it }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -46,7 +69,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 
     packaging {
         resources {
@@ -72,6 +98,7 @@ dependencies {
 
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.activity:activity-compose:1.10.1")
+    implementation("androidx.browser:browser:1.8.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.2")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.2")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.2")

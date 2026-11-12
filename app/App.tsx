@@ -4,6 +4,7 @@ import { theme } from "./src/core/theme";
 import { displayName } from "./src/core/cid";
 import { FirmSuite } from "./src/FirmSuite";
 import { CumulusIdSignIn, useCumulusId } from "./src/CumulusIdSignIn";
+import { Billing, BILLING_HIDDEN } from "./src/Billing";
 
 export default function App() {
   const cid = useCumulusId();
@@ -24,6 +25,7 @@ export default function App() {
                 <Text style={styles.link}>Sign out</Text>
               </Pressable>
             </View>
+            {BILLING_HIDDEN ? null : <Billing token={cid.session.token} />}
             <FirmSuite />
           </>
         ) : (

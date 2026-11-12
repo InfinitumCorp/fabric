@@ -14,12 +14,14 @@ import androidx.browser.customtabs.CustomTabsIntent
 import app.infinitumfabric.client.data.PrefsSessionStore
 import app.infinitumfabric.client.ui.FabricApp
 import app.infinitumfabric.client.ui.FabricTheme
+import app.infinitumfabric.client.analytics.Analytics
 
 class MainActivity : ComponentActivity() {
     private val model: FabricViewModel by viewModels { FabricViewModelFactory(PrefsSessionStore(applicationContext)) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Analytics.start(this)
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
         if (savedInstanceState == null) {

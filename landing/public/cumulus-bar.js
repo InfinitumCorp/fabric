@@ -171,20 +171,20 @@ button,a{font:inherit;color:inherit}
 
   function menuFor(host, p) {
     const menuId = `cid-menu-${Math.random().toString(36).slice(2)}`;
-    const avatar = h("button", { class: "avatar", type: "button", "aria-haspopup": "true", "aria-expanded": "false", "aria-controls": menuId, title: `Cumulus://ID: ${p.name || p.username || ""}\n${p.email || ""}` },
+    const avatar = h("button", { class: "avatar", type: "button", "aria-expanded": "false", "aria-controls": menuId, title: `Cumulus://ID: ${p.name || p.username || ""}\n${p.email || ""}` },
       h("span", { "aria-hidden": "true", text: initial(p) }), h("span", { class: "sr", text: `Account menu for ${p.email || p.username || ""}` }));
     const mailHref = "https://mail.cumuluscloud.app";
-    const menu = h("div", { class: "menu", id: menuId, role: "menu", hidden: true },
+    const menu = h("nav", { class: "menu", id: menuId, "aria-label": "Cumulus://ID account", hidden: true },
       h("div", { class: "who" },
         h("div", { class: "name", text: p.name || p.username || "" }),
         h("div", { class: "addr", text: p.email || "" }),
         p.org_name ? h("div", { class: "org", text: p.org_name }) : null),
-      h("a", { class: "item", role: "menuitem", href: `${ID}/account`, text: "Manage your Cumulus://ID" }),
-      h("a", { class: "item", role: "menuitem", href: mailHref }, ...wordmark("Cumulus://Mail")),
-      h("div", { class: "label", text: "Infinitum products" }),
-      h("ul", { class: "apps" }, APPS.filter((a) => a.id !== "cumulus-mail").map((a) =>
-        h("li", {}, h("a", { class: "app", role: "menuitem", href: a.href, "aria-current": a.id === PRODUCT ? "page" : null }, ...wordmark(a.name))))),
-      h("div", { class: "foot" }, h("button", { class: "item", type: "button", role: "menuitem", text: "Sign out", onclick: signOut })));
+      h("a", { class: "item", href: `${ID}/account`, text: "Manage your Cumulus://ID" }),
+      h("a", { class: "item", href: mailHref }, ...wordmark("Cumulus://Mail")),
+      h("div", { class: "label", id: `${menuId}-apps`, text: "Infinitum products" }),
+      h("ul", { class: "apps", "aria-labelledby": `${menuId}-apps` }, APPS.filter((a) => a.id !== "cumulus-mail").map((a) =>
+        h("li", {}, h("a", { class: "app", href: a.href, "aria-current": a.id === PRODUCT ? "page" : null }, ...wordmark(a.name))))),
+      h("div", { class: "foot" }, h("button", { class: "item", type: "button", text: "Sign out", onclick: signOut })));
     const open = (v) => {
       if (v) {
         // Open toward the side with room: a bar on the left of a header opens rightward.

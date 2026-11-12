@@ -4,7 +4,10 @@
  *   <span data-cumulus-id></span>
  *   <script src="/assets/cumulus-id.js" data-client="scalvs" defer></script>
  *
- * Copy this file onto the product's own site (canonical copy: https://id.cumuluscloud.app/id/button.js).
+ * Copy this file onto the product's own site, or load it from
+ * https://id.cumuluscloud.app/id/button.js. The default issuer is that host.
+ * data-issuer (or data-id) overrides it. data-client is the product's client id.
+ * Buttons that still point at https://mail.cumuluscloud.app keep using Mail's alias.
  * It only navigates the page, never calls fetch(), so it works under a strict
  * Content-Security-Policy (script-src 'self'; connect-src 'self'; form-action 'none').
  *
@@ -13,10 +16,9 @@
  *   2. /api/id/redeem (+verifier) -> back here with #cid_token&profile&state
  * The token stays in this tab's sessionStorage. Pages can listen for the "cumulus-id" event on
  * window (event.detail = { cid, username, email, name } or null) and use window.CumulusID:
- * { profile(), token(), signIn(), create(), signOut() }.
- * Signed out, it shows "Sign in with Cumulus ID" and "Create a Cumulus ID" (the same authorize
- * call with prompt=create; the person comes back here signed in either way).
- * The issuer is data-issuer (or data-id) so a Russia-reachable mirror can be dropped in.
+ * { profile(), token(), signIn(), create(), signOut() }. Signed out, it shows "Sign in" and
+ * "Create a Cumulus://ID" (same flow, prompt=create); a new account returns here signed in.
+ * data-label and data-create-label change the button text; data-create="false" hides Create.
  */
 (() => {
   const script = document.currentScript;
@@ -41,9 +43,7 @@
     const state = random(16);
     const redirect = here();
     store.set(PENDING, { verifier, state, redirect, scroll: scrollY });
-    const params = { client_id: CLIENT, redirect_uri: redirect, code_challenge: challenge, code_challenge_method: "S256", state };
-    if (opts && opts.create) params.prompt = "create";
-    go("/api/id/authorize", params);
+    go("/api/id/authorize", { client_id: CLIENT, redirect_uri: redirect, code_challenge: challenge, code_challenge_method: "S256", state, ...(opts && opts.create ? { prompt: "create" } : {}) });
   }
 
   function signOut() {
@@ -108,8 +108,8 @@
         who.title = `Signed in with Cumulus://ID as ${who.textContent}`;
         wrap.append(who, button("Sign out", signOut));
       } else {
-        wrap.append(button(host.dataset.label || "Sign in with Cumulus ID", () => signIn()));
-        wrap.append(button("Create a Cumulus ID", () => signIn({ create: true })));
+        wrap.append(button(host.dataset.label || "Sign in with Cumulus://ID", () => signIn()));
+        if (host.dataset.create !== "false") wrap.append(button(host.dataset.createLabel || "Create a Cumulus://ID", () => signIn({ create: true })));
         if (error) { const e = document.createElement("span"); e.className = "cid-err"; e.setAttribute("role", "alert"); e.textContent = error; wrap.append(e); }
       }
       host.replaceChildren(wrap);
@@ -117,7 +117,7 @@
     window.dispatchEvent(new CustomEvent("cumulus-id", { detail: s ? s.profile : null }));
   }
 
-  window.CumulusID = { profile: () => (current() || {}).profile || null, token: () => (current() || {}).token || null, signIn, create: () => signIn({ create: true }), signOut };
+  window.CumulusID = { profile: () => (current() || {}).profile || null, token: () => (current() || {}).token || null, signIn: () => signIn(), create: () => signIn({ create: true }), signOut };
 
   const style = document.createElement("style");
   style.textContent = CSS;

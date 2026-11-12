@@ -10,6 +10,8 @@
     "test:core": "node --test --experimental-strip-types src/core/*.test.ts"
   },
   "dependencies": {
+    "@noble/curves": "1.9.7",
+    "@noble/hashes": "1.8.0",
     "expo": "~58.0.0",
     "expo-crypto": "~58.0.7",
     "expo-dev-client": "~58.0.18",

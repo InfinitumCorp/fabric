@@ -11,7 +11,8 @@
  * menu with their name and @cumuluscloud.app address, "Manage your Cumulus://ID", Cumulus://Mail,
  * the product launcher and "Sign out". data-client is the product's client id (src/clients.ts).
  * Optional: data-issuer (a mirror), data-product (highlights the current product in the launcher),
- * data-create="false", data-theme="dark" (on the host element or the script) for dark headers.
+ * data-create="false", data-theme="dark" (on the host element or the script) for dark headers,
+ * data-lang="ru" (otherwise the page's <html lang> decides: Russian for ru, English for anything else).
  *
  * Sign-in is OAuth 2.0 authorization code + PKCE through page navigations only (no fetch), so it
  * works under a strict CSP; styles live in a shadow root via a constructed stylesheet. The token
@@ -31,6 +32,23 @@
   const PENDING = `${KEY}:pending`;
   const SIGNIN_URL = ds.signin || "";
   const SIGNOUT_URL = ds.signout || "";
+  const LANG = (ds.lang || document.documentElement.lang || "en").toLowerCase().startsWith("ru") ? "ru" : "en";
+  const RU = {
+    "Sign in": "Войти",
+    "Create a Cumulus://ID": "Создать Cumulus://ID",
+    "Manage your Cumulus://ID": "Управление Cumulus://ID",
+    "Infinitum products": "Продукты Infinitum",
+    "Sign out": "Выйти",
+    "Account menu for {who}": "Меню аккаунта {who}",
+    "Cumulus://ID account": "Аккаунт Cumulus://ID",
+    "That sign-in didn't match. Please try again.": "Этот вход не совпал. Попробуйте ещё раз.",
+    "Sign-in failed. Please try again.": "Не удалось войти. Попробуйте ещё раз.",
+    "Data Exchange": "Data Exchange",
+  };
+  const t = (s, vars) => {
+    const out = (LANG === "ru" && RU[s]) || s;
+    return vars ? out.replace(/\{(\w+)\}/g, (_, k) => (vars[k] ?? "")) : out;
+  };
 
   // Every product, as its wordmark. "tm" adds the ™ the brand rules require.
   const APPS = [
@@ -85,18 +103,18 @@
     if (frag.has("cid_token") || frag.has("cid_error")) {
       store.set(PENDING, null);
       history.replaceState(null, "", here());
-      if (!pending || frag.get("state") !== pending.state) { error = "That sign-in didn't match. Please try again."; return false; }
+      if (!pending || frag.get("state") !== pending.state) { error = t("That sign-in didn't match. Please try again."); return false; }
       if (frag.has("cid_error")) { error = frag.get("cid_error"); return false; }
       try {
         const profile = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(frag.get("profile").replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0))));
         store.set(KEY, { token: frag.get("cid_token"), profile, until: Date.now() + Number(frag.get("expires_in") || 3600) * 1000 });
         if (pending.scroll) requestAnimationFrame(() => scrollTo(0, pending.scroll));
-      } catch { error = "Sign-in failed. Please try again."; }
+      } catch { error = t("Sign-in failed. Please try again."); }
       return false;
     }
     const code = query.get("code"), state = query.get("state");
     if (code && state && pending && !SIGNIN_URL) {
-      if (state !== pending.state) { store.set(PENDING, null); history.replaceState(null, "", here()); error = "That sign-in didn't match. Please try again."; return false; }
+      if (state !== pending.state) { store.set(PENDING, null); history.replaceState(null, "", here()); error = t("That sign-in didn't match. Please try again."); return false; }
       go("/api/id/redeem", { client_id: CLIENT, redirect_uri: pending.redirect, code, code_verifier: pending.verifier, state });
       return true;
     }
@@ -172,19 +190,19 @@ button,a{font:inherit;color:inherit}
   function menuFor(host, p) {
     const menuId = `cid-menu-${Math.random().toString(36).slice(2)}`;
     const avatar = h("button", { class: "avatar", type: "button", "aria-expanded": "false", "aria-controls": menuId, title: `Cumulus://ID: ${p.name || p.username || ""}\n${p.email || ""}` },
-      h("span", { "aria-hidden": "true", text: initial(p) }), h("span", { class: "sr", text: `Account menu for ${p.email || p.username || ""}` }));
+      h("span", { "aria-hidden": "true", text: initial(p) }), h("span", { class: "sr", text: t("Account menu for {who}", { who: p.email || p.username || "" }) }));
     const mailHref = "https://mail.cumuluscloud.app";
-    const menu = h("nav", { class: "menu", id: menuId, "aria-label": "Cumulus://ID account", hidden: true },
+    const menu = h("nav", { class: "menu", id: menuId, "aria-label": t("Cumulus://ID account"), hidden: true },
       h("div", { class: "who" },
         h("div", { class: "name", text: p.name || p.username || "" }),
         h("div", { class: "addr", text: p.email || "" }),
         p.org_name ? h("div", { class: "org", text: p.org_name }) : null),
-      h("a", { class: "item", href: `${ID}/account`, text: "Manage your Cumulus://ID" }),
+      h("a", { class: "item", href: `${ID}/account`, text: t("Manage your Cumulus://ID") }),
       h("a", { class: "item", href: mailHref }, ...wordmark("Cumulus://Mail")),
-      h("div", { class: "label", id: `${menuId}-apps`, text: "Infinitum products" }),
+      h("div", { class: "label", id: `${menuId}-apps`, text: t("Infinitum products") }),
       h("ul", { class: "apps", "aria-labelledby": `${menuId}-apps` }, APPS.filter((a) => a.id !== "cumulus-mail").map((a) =>
         h("li", {}, h("a", { class: "app", href: a.href, "aria-current": a.id === PRODUCT ? "page" : null }, ...wordmark(a.name))))),
-      h("div", { class: "foot" }, h("button", { class: "item", type: "button", text: "Sign out", onclick: signOut })));
+      h("div", { class: "foot" }, h("button", { class: "item", type: "button", text: t("Sign out"), onclick: signOut })));
     const open = (v) => {
       if (v) {
         // Open toward the side with room: a bar on the left of a header opens rightward.
@@ -218,8 +236,8 @@ button,a{font:inherit;color:inherit}
       const wrap = h("div", { class: "wrap" });
       if (p) wrap.append(...menuFor(host, p));
       else {
-        wrap.append(h("button", { class: "btn primary", type: "button", text: host.dataset.label || "Sign in", onclick: () => signIn() }));
-        if ((host.dataset.create || ds.create) !== "false") wrap.append(h("button", { class: "btn", type: "button", text: host.dataset.createLabel || "Create a Cumulus://ID", onclick: () => signIn({ create: true }) }));
+        wrap.append(h("button", { class: "btn primary", type: "button", text: host.dataset.label || t("Sign in"), onclick: () => signIn() }));
+        if ((host.dataset.create || ds.create) !== "false") wrap.append(h("button", { class: "btn", type: "button", text: host.dataset.createLabel || t("Create a Cumulus://ID"), onclick: () => signIn({ create: true }) }));
         if (error) wrap.append(h("span", { class: "err", role: "alert", text: error }));
       }
       [...root.childNodes].forEach((n) => { if (n.nodeName !== "STYLE") n.remove(); });

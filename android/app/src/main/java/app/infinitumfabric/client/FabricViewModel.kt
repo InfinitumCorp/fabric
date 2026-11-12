@@ -8,6 +8,9 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import app.infinitumfabric.client.data.ApiRoutes
 import app.infinitumfabric.client.data.BaseUrlPolicy
+import app.infinitumfabric.client.data.BillingEntitlement
+import app.infinitumfabric.client.data.BillingPlan
+import app.infinitumfabric.client.data.BillingReturn
 import app.infinitumfabric.client.data.CidProfile
 import app.infinitumfabric.client.data.CumulusId
 import app.infinitumfabric.client.data.EconomyPreview
@@ -17,6 +20,7 @@ import app.infinitumfabric.client.data.LocalChat
 import app.infinitumfabric.client.data.Purpose
 import app.infinitumfabric.client.data.MemorySessionStore
 import app.infinitumfabric.client.data.RelayStatus
+import app.infinitumfabric.client.data.RevenueApi
 import app.infinitumfabric.client.data.SessionStore
 import app.infinitumfabric.client.domain.isValidHandle
 import app.infinitumfabric.client.domain.normalizeHandle
@@ -40,6 +44,7 @@ class FabricViewModel(
     private val apiFactory: (String) -> FabricApi = { FabricApi(baseUrl = it) },
     private val cid: CumulusId = CumulusId(cidConfig()),
     private val store: SessionStore = MemorySessionStore(),
+    private val revenue: RevenueApi = RevenueApi(baseUrl = BuildConfig.REVENUE_URL),
 ) : ViewModel() {
     var screen by mutableStateOf<Screen>(Screen.SignIn)
         private set
@@ -71,6 +76,25 @@ class FabricViewModel(
         private set
     var showAdvanced by mutableStateOf(false)
         private set
+
+    // Plan and billing (revenue API; Stripe Checkout and portal open in a Custom Tab).
+    var billingPlans by mutableStateOf<List<BillingPlan>>(emptyList())
+        private set
+    var entitlement by mutableStateOf<BillingEntitlement?>(null)
+        private set
+    var seats by mutableStateOf("1")
+        private set
+    var orgName by mutableStateOf("")
+        private set
+    var billingBusy by mutableStateOf(false)
+        private set
+
+    /** A Stripe URL for the activity to open in a Custom Tab; cleared with [browserOpened]. */
+    var browserUrl by mutableStateOf<String?>(null)
+        private set
+
+    /** True after Checkout or the portal was opened, until entitlements are read again. */
+    private var billingOpen = false
 
     init {
         val saved = store.loadSession()
@@ -163,7 +187,10 @@ class FabricViewModel(
         error = null
         screen = next
         when (next) {
-            Screen.Plan -> loadPlan()
+            Screen.Plan -> {
+                loadPlan()
+                loadBilling()
+            }
             Screen.Data -> loadData()
             Screen.Settings -> loadSettings()
             else -> Unit
@@ -191,6 +218,108 @@ class FabricViewModel(
         notice = "Kept on this device. A registered socket is required before the relay records consent."
     }
 
+    fun updateSeats(value: String) {
+        seats = value.filter(Char::isDigit).take(4)
+    }
+
+    fun updateOrgName(value: String) {
+        orgName = value.take(120)
+    }
+
+    /** Upgrade to Business: switch the account to a business organization, then open Checkout. */
+    fun upgradeToBusiness() {
+        val quantity = seats.toIntOrNull() ?: 0
+        if (quantity < 1) {
+            error = "Enter at least 1 seat."
+            return
+        }
+        val name = orgName
+        billing { token ->
+            revenue.becomeBusiness(token, name)
+            revenue.checkout(token, RevenueApi.BUSINESS_PLAN, quantity, RevenueApi.BILLING_RETURN_URL)
+        }
+    }
+
+    /** Manage billing: the Stripe customer portal. */
+    fun manageBilling() {
+        billing { token -> revenue.portal(token, RevenueApi.BILLING_RETURN_URL) }
+    }
+
+    fun browserOpened() {
+        browserUrl = null
+    }
+
+    fun reportBrowserFailed() {
+        billingOpen = false
+        error = "No browser is installed to open billing."
+    }
+
+    /** Handles https://infinitumfabric.app/billing/return?billing=... Returns false for any other link. */
+    fun handleBillingReturn(uri: String): Boolean {
+        val back = RevenueApi.parseBillingReturn(uri) ?: return false
+        notice = when (back) {
+            BillingReturn.Success -> "Payment complete. Your plan is active."
+            BillingReturn.Cancelled -> "Checkout cancelled. No charge was made."
+            BillingReturn.Unknown -> null
+        }
+        if (signedIn) {
+            error = null
+            screen = Screen.Plan
+            billingOpen = true
+            refreshEntitlement()
+        }
+        return true
+    }
+
+    /** Called when the app comes back to the foreground: picks up a plan change made in the browser. */
+    fun onResume() {
+        if (signedIn && (billingOpen || screen == Screen.Plan)) refreshEntitlement()
+    }
+
+    private fun loadBilling() {
+        refreshEntitlement()
+        viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) { revenue.catalog() } }
+                .onSuccess { billingPlans = it }
+                .onFailure { if (billingPlans.isEmpty()) error = "Plans could not be loaded." }
+        }
+    }
+
+    private fun refreshEntitlement() {
+        val token = liveToken() ?: return
+        viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) { revenue.entitlement(token) } }
+                .onSuccess {
+                    entitlement = it
+                    billingOpen = false
+                }
+        }
+    }
+
+    private fun liveToken(): String? = store.loadSession()?.takeIf { it.isLive() }?.token
+
+    private fun billing(open: (String) -> String) {
+        val token = liveToken()
+        if (token == null) {
+            error = "Your Cumulus ID session has ended. Sign in again to manage billing."
+            return
+        }
+        if (billingBusy) return
+        viewModelScope.launch {
+            billingBusy = true
+            error = null
+            try {
+                val url = withContext(Dispatchers.IO) { open(token) }
+                billingOpen = true
+                browserUrl = url
+            } catch (thrown: Throwable) {
+                error = redact(thrown.message ?: thrown.javaClass.simpleName)
+            } finally {
+                billingBusy = false
+            }
+        }
+    }
+
     fun signOut() {
         val session = store.loadSession()
         store.saveSession(null)
@@ -206,6 +335,9 @@ class FabricViewModel(
         ledger = null
         relay = null
         consent = emptyMap()
+        entitlement = null
+        billingOpen = false
+        browserUrl = null
         notice = null
         error = null
         screen = Screen.SignIn

@@ -29,7 +29,7 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Cumulus ID return: App Link (verified by /.well-known/assetlinks.json on infinitumfabric.app). -->
+            <!-- Cumulus ID and billing returns: App Link (verified by /.well-known/assetlinks.json on infinitumfabric.app). -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -37,13 +37,15 @@
                 <data android:scheme="https" />
                 <data android:host="infinitumfabric.app" />
                 <data android:path="/cid/return" />
+                <data android:path="/billing/return" />
             </intent-filter>
-            <!-- Cumulus ID return when the browser keeps the https page: it hands off to this scheme. -->
+            <!-- Cumulus ID and billing returns when the browser keeps the https page: it hands off to this scheme. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="infinitumfabric" android:host="cid" android:path="/return" />
+                <data android:scheme="infinitumfabric" android:host="billing" android:path="/return" />
             </intent-filter>
         </activity>
     </application>

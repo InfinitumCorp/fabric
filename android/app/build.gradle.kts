@@ -30,6 +30,10 @@ android {
         buildConfigField("String", "CID_ISSUER", "\"$cidIssuer\"")
         buildConfigField("String", "CID_CLIENT", "\"fabric\"")
         buildConfigField("String", "CID_REDIRECT", "\"https://infinitumfabric.app/cid/return\"")
+        // Infinitum revenue API (plans and Stripe billing). Override with -PrevenueUrl=https://<host>.
+        val revenueUrl = (project.findProperty("revenueUrl") as String?) ?: "https://infinitum-revenue.infinitumcorp.workers.dev"
+        require(revenueUrl.startsWith("https://")) { "revenueUrl must be HTTPS" }
+        buildConfigField("String", "REVENUE_URL", "\"$revenueUrl\"")
     }
 
     // Release signing: keystore and password files stay outside the repo.

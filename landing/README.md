@@ -12,6 +12,6 @@ npx wrangler deploy
 
 ## Cumulus ID
 
-- Header: `cumulus-id.js` (client `fabric`, `data-issuer` for a mirror) shows **Sign in with Cumulus ID** and **Create a Cumulus ID**.
+- Header: the Cumulus://ID account bar, `cumulus-bar.js` (a copy of `https://id.cumuluscloud.app/id/bar.js`; client `fabric`, `data-issuer` for a mirror), on every page with a header. Signed out it shows **Sign in** and **Create a Cumulus://ID**; signed in, the account menu and product launcher.
 - `/cid/return` (Android app) and `/cid/rn` (React Native app): the IdP's redirect for the apps; they hand `code`/`state` to the app's scheme.
 - `/.well-known/assetlinks.json`: verifies the Android App Link for `app.infinitumfabric.client` (release key SHA-256). After deploy, check it is served as JSON at `https://infinitumfabric.app/.well-known/assetlinks.json`.

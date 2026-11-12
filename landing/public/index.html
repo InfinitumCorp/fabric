@@ -38,10 +38,10 @@ ul.grid p{margin:0;color:var(--muted)}
 footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;padding-top:24px;padding-bottom:40px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
 sup.tm{font-size:.38em;vertical-align:super;line-height:0;margin-left:.08em;letter-spacing:0;font-weight:400}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}</style>
-<style id="cid-style">.cid-slot{display:inline-flex;align-items:center;margin-left:auto}.cid-fixed{position:fixed;top:12px;right:12px;z-index:1000;background:#fff;color:#111820;padding:4px}@media (max-width:720px){.cid-slot .cid-who{display:none}header{height:auto;min-height:72px;flex-wrap:wrap;gap:8px;padding-top:8px;padding-bottom:8px}}</style></head>
+<style id="cid-style">header{column-gap:24px}.cumulus-bar{display:inline-flex;align-items:center;flex-shrink:0;max-width:100%;margin-left:auto}@media (max-width:720px){header{height:auto;min-height:72px;flex-wrap:wrap;gap:8px 16px;padding-top:8px;padding-bottom:8px}}</style></head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
-<header><a class="wordmark" href="/" aria-label="FABRIC home">FABRIC<sup class="tm">™</sup></a><span class="status">In development</span><span class="cid-slot" data-cumulus-id data-label="Sign in with Cumulus ID"></span></header>
+<header><a class="wordmark" href="/" aria-label="FABRIC home">FABRIC<sup class="tm">™</sup></a><span class="status">In development</span><div class="cumulus-bar" data-cumulus-bar></div></header>
 <main id="main">
 <h1>FABRIC<sup class="tm">™</sup></h1>
 <p class="lede">Encrypted messaging, voice and video with AI that stays on your device, and an opt-in data economy that shares revenue with the people who create it.</p>
@@ -51,6 +51,7 @@ sup.tm{font-size:.38em;vertical-align:super;line-height:0;margin-left:.08em;lett
 <p class="note">Apps for Android and iPhone are in development. FABRIC<sup class="tm">™</sup> is in development. You can sign in with your Cumulus://ID<sup class="tm">™</sup> now; messaging opens when the apps launch, and Infinitum Corporation will announce it here.</p>
 </main>
 <footer><span>© 2026 Infinitum Corporation<sup class="tm">®</sup> · 1629 K Street NW, Suite 300, Washington, D.C.</span><span><a href="https://infinitumcorporation.ai/">infinitumcorporation.ai</a> · <a href="https://infinitumcorporation.ai/privacy-policy">Privacy</a> · <a href="https://infinitumcorporation.ai/terms-of-use">Terms</a></span></footer>
-<script src="/cumulus-id.js" data-client="fabric" data-issuer="https://id.cumuluscloud.app" defer></script>
+<!-- Cumulus://ID account bar: copy of https://id.cumuluscloud.app/id/bar.js -->
+<script src="/cumulus-bar.js" data-client="fabric" data-issuer="https://id.cumuluscloud.app" defer></script>
 </body>
 </html>

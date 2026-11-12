@@ -1,6 +1,8 @@
 // "Sign in with Cumulus ID" for the FabriC++ React Native app. White/black, hairlines, no shadows.
-// Opens the issuer in an auth session (Custom Tab / ASWebAuthenticationSession); the IdP returns to
-// https://infinitumfabric.app/cid/rn, which hands code and state to infinitumfabric-app://cid/return.
+// Opens the Cumulus://ID OIDC issuer in an auth session (Custom Tab / ASWebAuthenticationSession)
+// with PKCE S256 and a nonce; the IdP returns to https://infinitumfabric.app/cid/rn, which hands code
+// and state to infinitumfabric-app://cid/return. The ID token is verified against the issuer's JWKS
+// (ES256, iss, aud, exp, nonce) before the session is kept; the person is keyed by its sub.
 import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import * as Crypto from "expo-crypto";
@@ -10,15 +12,19 @@ import { theme } from "./core/theme";
 import {
   CID_APP_RETURN,
   CID_CLIENT,
-  CID_REDIRECT,
   authorizeUrl,
   base64url,
+  cidEndpoints,
   cidIssuer,
   isLive,
   parseReturn,
   sessionFrom,
+  tokenRequestBody,
+  tokenResponse,
+  verifyIdToken,
   type CidSession,
 } from "./core/cid";
+import { verifyEs256 } from "./es256";
 
 const KEY = "cumulus-id.session";
 const ISSUER = cidIssuer(process.env.EXPO_PUBLIC_CID_ISSUER);
@@ -43,29 +49,42 @@ async function loadSession(): Promise<CidSession | null> {
 async function runSignIn(create: boolean): Promise<CidSession | null> {
   const verifier = base64url(bytesToBase64(Crypto.getRandomBytes(48)));
   const state = base64url(bytesToBase64(Crypto.getRandomBytes(16)));
+  const nonce = base64url(bytesToBase64(Crypto.getRandomBytes(16)));
   const challenge = base64url(
     await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, verifier, { encoding: Crypto.CryptoEncoding.BASE64 }),
   );
-  const url = authorizeUrl({ verifier, state, issuer: ISSUER }, challenge, create);
+  const pending = { verifier, state, nonce, issuer: ISSUER };
+  const url = authorizeUrl(pending, challenge, create);
   const result = await WebBrowser.openAuthSessionAsync(url, CID_APP_RETURN);
   if (result.type !== "success") return null;
   const back = parseReturn(result.url);
   if (!back || back.error) throw new Error("Cumulus ID sign-in was not completed.");
   if (back.state !== state || !back.code) throw new Error("That sign-in did not match. Please try again.");
-  const res = await fetch(`${ISSUER}/api/id/token`, {
+  const endpoints = cidEndpoints(ISSUER);
+  const res = await fetch(endpoints.token, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ code: back.code, code_verifier: verifier, client_id: CID_CLIENT, redirect_uri: CID_REDIRECT }),
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+    body: tokenRequestBody(pending, back.code),
   });
-  const body: unknown = await res.json().catch(() => ({}));
-  const session = sessionFrom(res.status, body);
+  const token = tokenResponse(res.status, await res.json().catch(() => ({})));
+  const jwks = await fetch(endpoints.jwks, { headers: { Accept: "application/json" } })
+    .then((r) => r.json())
+    .catch(() => ({}));
+  const keys = Array.isArray((jwks as { keys?: unknown }).keys) ? (jwks as { keys: [] }).keys : [];
+  const claims = await verifyIdToken(token.idToken, { issuer: ISSUER, nonce, keys, verify: verifyEs256 });
+  const session = sessionFrom(token, claims);
   await SecureStore.setItemAsync(KEY, JSON.stringify(session));
   return session;
 }
 
 async function endSession(session: CidSession) {
   await SecureStore.deleteItemAsync(KEY).catch(() => undefined);
-  fetch(`${ISSUER}/api/id/signout`, { method: "POST", headers: { Authorization: `Bearer ${session.token}` } }).catch(() => undefined);
+  // Revoke at Cumulus://ID so this app session leaves the person's session list.
+  fetch(cidEndpoints(ISSUER).revoke, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ token: session.token, client_id: CID_CLIENT }).toString(),
+  }).catch(() => undefined);
 }
 
 /** Restores the saved session. `ready` is false until the secure store has been read. */

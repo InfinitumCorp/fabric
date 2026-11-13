@@ -30,6 +30,13 @@ android {
         buildConfigField("String", "CID_ISSUER", "\"$cidIssuer\"")
         buildConfigField("String", "CID_CLIENT", "\"fabric\"")
         buildConfigField("String", "CID_REDIRECT", "\"https://infinitumfabric.app/cid/return\"")
+        // Infinitum revenue API (plans and Stripe billing). Override with -PrevenueUrl=https://<host>.
+        val revenueUrl = (project.findProperty("revenueUrl") as String?) ?: "https://infinitum-revenue.infinitumcorp.workers.dev"
+        require(revenueUrl.startsWith("https://")) { "revenueUrl must be HTTPS" }
+        buildConfigField("String", "REVENUE_URL", "\"$revenueUrl\"")
+        // Plans and billing are hidden on MIL/defense builds: -Pedition=mil.
+        val edition = ((project.findProperty("edition") as String?) ?: "commercial").lowercase()
+        buildConfigField("boolean", "BILLING_ENABLED", (!edition.startsWith("mil") && edition != "defense").toString())
     }
 
     // Release signing: keystore and password files stay outside the repo.

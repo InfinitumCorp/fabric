@@ -10,7 +10,7 @@ if [ ! -f data/homeserver.yaml ]; then
 fi
 # shellcheck disable=SC1091
 . ./.env
-docker run --rm -i -v "$PWD/data:/data" -e DBPW="$FABRIC_DB_PASSWORD" --entrypoint python "$IMG" - <<'PY'
+docker run --rm -i -v "$PWD/data:/data" -e DBPW="$FABRIC_DB_PASSWORD" -e LOCAL_TEST_RATELIMITS="${FABRIC_LOCAL_TEST_RATELIMITS:-0}" --entrypoint python "$IMG" - <<'PY'
 import os, yaml
 p = "/data/homeserver.yaml"
 c = yaml.safe_load(open(p))
@@ -22,6 +22,13 @@ c["allow_public_rooms_over_federation"] = False
 c["trusted_key_servers"] = []
 c["encryption_enabled_by_default_for_room_type"] = "all"
 c["report_stats"] = False
+# Emulator test runs log in repeatedly from one address; Synapse defaults (failed-login lockout ~5 min) stall them.
+# Opt-in only for the local test server; never set for a deployed server.
+if os.environ.get("LOCAL_TEST_RATELIMITS") == "1":
+    r = {"per_second": 50, "burst_count": 100}
+    c["rc_login"] = {"address": r, "account": r, "failed_attempts": r}
+else:
+    c.pop("rc_login", None)
 yaml.safe_dump(c, open(p, "w"), sort_keys=False)
 PY
 echo configured

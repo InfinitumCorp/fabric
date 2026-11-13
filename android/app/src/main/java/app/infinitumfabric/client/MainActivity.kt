@@ -11,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.compose.runtime.LaunchedEffect
 import app.infinitumfabric.client.data.PrefsSessionStore
 import app.infinitumfabric.client.ui.FabricApp
 import app.infinitumfabric.client.ui.FabricTheme
@@ -28,7 +29,34 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             FabricTheme {
+                // Stripe Checkout and the billing portal open in a Custom Tab, never inside the app.
+                val billingUrl = model.browserUrl
+                LaunchedEffect(billingUrl) {
+                    if (billingUrl != null) {
+                        model.browserOpened()
+                        openBilling(billingUrl)
+                    }
+                }
                 FabricApp(model, openCumulusId = ::openCumulusId)
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        model.onResume()
+    }
+
+    /** Opens a Stripe page from the revenue API in a Custom Tab (falls back to the default browser). */
+    private fun openBilling(url: String) {
+        val uri = Uri.parse(url)
+        try {
+            CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(this, uri)
+        } catch (_: ActivityNotFoundException) {
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, uri))
+            } catch (_: ActivityNotFoundException) {
+                model.reportBrowserFailed()
             }
         }
     }
@@ -41,7 +69,7 @@ class MainActivity : ComponentActivity() {
     private fun handleReturn(intent: Intent?) {
         val data = intent?.data ?: return
         if (intent.action == Intent.ACTION_VIEW) {
-            model.handleCidReturn(data.toString())
+            if (!model.handleBillingReturn(data.toString())) model.handleCidReturn(data.toString())
             // Do not process the same code twice after a configuration change.
             setIntent(Intent(this, MainActivity::class.java))
         }

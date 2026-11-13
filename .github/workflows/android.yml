@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   debug-apks:
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
@@ -43,20 +47,20 @@ jobs:
           echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
 
       - name: Lint, unit test, assemble debug APKs
-        working-directory: android
+        working-directory: android-native
         run: ./gradlew lint test assembleDebug assembleDebugAndroidTest --stacktrace
 
       - name: SHA256 of debug APKs
-        run: sha256sum android/app/build/outputs/apk/debug/*.apk android/app/build/outputs/apk/androidTest/debug/*.apk
+        run: sha256sum android-native/app/build/outputs/apk/debug/*.apk android-native/app/build/outputs/apk/androidTest/debug/*.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: fabric-app-debug
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: android-native/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v4
         with:
           name: fabric-androidTest-debug
-          path: android/app/build/outputs/apk/androidTest/debug/*.apk
+          path: android-native/app/build/outputs/apk/androidTest/debug/*.apk
           if-no-files-found: error

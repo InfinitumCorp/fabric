@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FabriC++™</title>
+  <meta name="description" content="FabriC++ by Infinitum Corporation: end-to-end encrypted messages, calls and phone." />
+  <meta name="theme-color" content="#ffffff" />
+  <link rel="icon" href="/brand/fabric-icon.svg" type="image/svg+xml" />
+  <link rel="icon" href="/brand/icon-32.png" sizes="32x32" type="image/png" />
+  <link rel="apple-touch-icon" href="/brand/icon-180.png" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/bots.css" />
+  <link rel="stylesheet" href="/spaces.css" />
+  <link rel="stylesheet" href="/i18n/i18n.css" />
+</head>
+<body>
+  <div id="boot" class="boot" aria-hidden="true"><img src="/brand/fabric-icon.svg" alt="" width="96" height="96" /><div class="brand">FabriC++<sup>™</sup></div></div>
+  <div id="onboard" class="screen hidden">
+    <div class="card onboard-card">
+      <p class="eyebrow">Product / Communications · Infinitum Corporation</p>
+      <div class="brand">FabriC++<sup>™</sup></div>
+      <p class="tag">Communicate. Generate. Earn. Trade.</p>
+      <div class="seg">
+        <button type="button" data-onboard="create" class="active">New account</button>
+        <button type="button" data-onboard="link">Link this device</button>
+        <button type="button" data-onboard="restore">Restore backup</button>
+      </div>
+      <div id="panel-create" class="onboard-panel">
+      <p class="muted">Pick your internal address. Your encryption keys are created on this device and never leave it.</p>
+      <div id="cid-required" class="cid-step hidden">
+        <p class="muted small">This relay asks every new address to have a Cumulus://ID, your Infinitum account. It never gets a key that can read your messages.</p>
+        <button id="cid-register" class="cid-button" type="button">Sign in with Cumulus://ID</button>
+        <p id="cid-register-who" class="small"></p>
+      </div>
+      <form id="onboard-form">
+        <label class="field">
+          <span>Address</span>
+          <div class="handle-input"><span>+</span><input id="onboard-handle" autocomplete="off" placeholder="alex" maxlength="24" required /><span>.veil</span></div>
+        </label>
+        <button class="primary" type="submit">Create identity</button>
+        <p id="onboard-error" class="error"></p>
+      </form>
+      </div>
+      <div id="panel-link" class="onboard-panel hidden">
+        <p class="muted">Already use FabriC++ on another device? This device gets its own keys. Your primary device scans a QR code (or you paste a code), then you check that both screens show the same six digits.</p>
+        <label class="field"><span>Name for this device</span>
+          <input id="link-name" class="text-input" maxlength="40" autocomplete="off" placeholder="e.g. Work laptop" /></label>
+        <button id="link-start" class="primary" type="button">Show link code</button>
+        <div id="link-wait" class="hidden">
+          <p class="muted small">On your primary device open <b>Security → Devices</b>, choose <b>Scan QR code</b> and point the camera at this:</p>
+          <canvas id="link-qr" class="qr" width="10" height="10" aria-label="Link code as a QR code"></canvas>
+          <p class="muted small">No camera? Paste this code there instead:</p>
+          <div class="code-box"><code id="link-code"></code><button id="link-copy" class="ghost" type="button">Copy</button></div>
+          <div id="link-confirm" class="confirm hidden">
+            <p>Your primary device should now show:</p>
+            <div id="link-sas" class="sas"></div>
+            <p class="muted small">Only continue if the two numbers are the same. If they differ, someone may be trying to step in.</p>
+            <div class="row"><button id="link-sas-ok" class="primary" type="button">They match</button><button id="link-sas-no" class="ghost" type="button">They don't</button></div>
+          </div>
+          <p id="link-status" class="muted small"></p>
+        </div>
+        <p id="link-error" class="error"></p>
+      </div>
+      <div id="panel-restore" class="onboard-panel hidden">
+        <p class="muted">Lost your device? Restore your account from a backup file and its recovery key. This device becomes the primary and your contacts keep the same safety number.</p>
+        <div id="cid-restore-box" class="cid-step hidden">
+          <button id="cid-restore" class="cid-button" type="button">Sign in with Cumulus://ID</button>
+          <p class="muted small">Finds the backup you saved to Cumulus. You still need its recovery key: Cumulus can't open it.</p>
+          <p id="cid-restore-note" class="small"></p>
+        </div>
+        <form id="restore-form">
+          <label id="restore-file-row" class="field"><span>Backup file</span><input id="restore-file" type="file" accept=".json,application/json" /></label>
+          <label class="field"><span>Recovery key</span>
+            <input id="restore-key" class="text-input mono" autocomplete="off" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX" /></label>
+          <button class="primary" type="submit">Restore</button>
+          <p id="restore-error" class="error"></p>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div id="unlock" class="screen hidden">
+    <div class="card onboard-card">
+      <p class="eyebrow">Product / Communications · Infinitum Corporation</p>
+      <div class="brand">FabriC++<sup>™</sup></div>
+      <p class="tag">Locked</p>
+      <p class="muted">Your keys and messages on this device are encrypted. Enter your passphrase to open them.</p>
+      <form id="unlock-form">
+        <label class="field">
+          <span>Passphrase</span>
+          <input id="unlock-pass" class="text-input" type="password" autocomplete="current-password" required />
+        </label>
+        <button class="primary" type="submit">Unlock</button>
+        <p id="unlock-error" class="error"></p>
+      </form>
+    </div>
+  </div>
+
+  <div id="revoked" class="screen hidden">
+    <div class="card onboard-card">
+      <p class="eyebrow">Product / Communications · Infinitum Corporation</p>
+      <div class="brand">FabriC++<sup>™</sup></div>
+      <p class="tag">Device removed</p>
+      <p class="muted">This device was removed from the account by your primary device. It can no longer send or receive messages. Erase it to set it up again.</p>
+      <button id="revoked-reset" class="primary" type="button">Erase this device</button>
+    </div>
+  </div>
+
+  <div id="app" class="screen hidden">
+    <aside class="sidebar">
+      <header class="side-head">
+        <div class="side-top">
+          <div class="brand small">FabriC++<sup>™</sup></div>
+          <div class="icon-row">
+            <button type="button" id="new-group" class="icon-btn" title="New group" aria-label="New group"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 19c0-3 3-5 6-5s6 2 6 5M16 5a3 3 0 010 6M18 14c2 .6 3 2.4 3 5"/></svg></button>
+            <button type="button" id="new-chat" class="icon-btn" title="New chat" aria-label="New chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg></button>
+            <button type="button" data-tab="settings" class="icon-btn tab-link" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></button>
+          </div>
+        </div>
+        <div class="me-line"><span id="me" class="me"></span> <span id="conn" class="conn">connecting…</span></div>
+        <div id="me-device" class="muted small"></div>
+      </header>
+      <nav class="tabs" aria-label="Sections">
+        <button data-tab="chats" class="tab active"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg><span>Chats</span></button>
+        <button data-tab="calls" class="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a1 1 0 01-1 1A16 16 0 014 5a1 1 0 011-1z"/></svg><span>Calls</span></button>
+        <button type="button" id="new-action" class="tab tab-new" aria-haspopup="dialog" title="FabText, FabVoice, FabVid or group"><span class="new-plus"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span><span>New</span></button>
+        <button data-tab="phone" class="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2" width="10" height="20"/><path d="M11 18h2"/></svg><span>Phone</span></button>
+        <button data-tab="settings" class="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg><span>Settings</span></button>
+      </nav>
+      <form id="add-contact" class="add-contact" role="search">
+        <svg class="search-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M16 16l5 5"/></svg>
+        <input id="add-handle" type="search" placeholder="Search, or start a chat with +name" autocomplete="off" aria-label="Search chats or start a chat" />
+        <button type="submit" title="Start chat" aria-label="Start chat">+</button>
+      </form>
+      <p id="add-error" class="error small"></p>
+      <ul id="contacts" class="contacts"></ul>
+      <div id="search-hits" class="search-hits hidden"></div>
+    </aside>
+
+    <main class="main">
+      <section id="view-chats" class="view">
+        <div id="empty" class="empty">
+          <h2>End-to-end encrypted.</h2>
+          <p class="muted">Add a contact by address to start. Only you and they can read what you send — not the relay, not Infinitum.</p>
+        </div>
+        <div id="thread" class="thread hidden">
+          <header class="thread-head">
+            <button type="button" id="back" class="icon-btn back" title="Back to chats" aria-label="Back to chats"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+            <div id="peer-avatar" class="avatar" aria-hidden="true"></div>
+            <div class="peer-box">
+              <div id="peer" class="peer" translate="no"></div>
+              <div class="peer-sub muted small"><span id="peer-status">🔒 End-to-end encrypted<span id="pq-badge"></span></span><span id="typing" class="typing hidden"></span></div>
+            </div>
+            <div class="head-actions">
+              <span id="call-buttons">
+                <button id="call-voice" class="icon-btn" title="FabVoice call" aria-label="FabVoice call"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a1 1 0 01-1 1A16 16 0 014 5a1 1 0 011-1z"/></svg></button>
+                <button id="call-video" class="icon-btn" title="FabVid call" aria-label="FabVid call"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12"/><path d="M16 10l5-3v10l-5-3"/></svg></button>
+              </span>
+              <div class="menu-wrap">
+                <button type="button" id="thread-menu-btn" class="icon-btn" title="More" aria-label="More" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg></button>
+                <div id="thread-menu" class="menu hidden" role="menu">
+                  <button type="button" id="thread-search-btn" role="menuitem">Search in chat</button>
+                  <button id="translate-toggle" type="button" role="menuitem" title="Translate incoming messages on this device" aria-pressed="false">Translate</button>
+                  <button id="summarize" type="button" role="menuitem">Summarize on device</button>
+                  <button id="show-safety" type="button" role="menuitem">Safety number</button>
+                  <button type="button" id="group-info-btn" class="hidden" role="menuitem">Group info</button>
+                  <button type="button" id="mute-chat" role="menuitem">Mute notifications</button>
+                  <button type="button" id="archive-chat" role="menuitem">Archive chat</button>
+                  <button type="button" id="clear-chat" role="menuitem">Clear chat on this device</button>
+                </div>
+              </div>
+            </div>
+          </header>
+          <form id="thread-search" class="thread-search hidden" role="search">
+            <input id="thread-search-q" type="search" placeholder="Search in this chat" autocomplete="off" aria-label="Search in this chat" />
+            <span id="thread-search-count" class="muted small"></span>
+            <button type="button" id="thread-search-close" class="icon-btn" aria-label="Close search"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+          </form>
+          <div id="key-warning" class="warning hidden"></div>
+          <div id="safety" class="safety hidden"></div>
+          <div id="summary" class="summary hidden"></div>
+          <ol id="messages" class="messages"></ol>
+          <div id="ai-needs" class="ai-needs hidden"></div>
+          <div id="replies" class="replies hidden" aria-label="Suggested replies"></div>
+          <div id="out-preview" class="out-preview hidden" aria-live="polite"></div>
+          <div id="compose-ctx" class="compose-ctx hidden">
+            <div class="compose-ctx-body"><strong id="compose-ctx-label"></strong><span id="compose-ctx-text"></span></div>
+            <button id="compose-ctx-close" class="icon-btn" type="button" title="Cancel" aria-label="Cancel">✕</button>
+          </div>
+          <div id="rec-bar" class="rec-bar hidden" aria-live="polite">
+            <span class="rec-dot" aria-hidden="true"></span><span id="rec-time">0:00</span><span class="muted small">Recording voice message</span>
+            <button id="rec-cancel" class="ghost" type="button">Cancel</button>
+            <button id="rec-send" class="primary" type="button">Send</button>
+          </div>
+          <form id="composer" class="composer">
+            <button id="attach" class="icon-btn" type="button" title="Photo or file" aria-label="Attach a photo or file"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11l-8 8a5 5 0 01-7-7l8-8a3.5 3.5 0 015 5l-8 8a2 2 0 01-3-3l7-7"/></svg></button>
+            <input id="attach-input" type="file" class="hidden" />
+            <textarea id="text" rows="1" autocomplete="off" placeholder="Message" maxlength="4000" aria-label="Message"></textarea>
+            <label class="tr-pick icon-btn" title="Send in another language (translated on this device)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h9M8.5 3v2M6 5c0 4 3 7 6 8M11 5c0 4-3 7-7 8M13 21l4-10 4 10M14.5 17h5"/></svg>
+              <span id="tr-code" class="tr-code hidden"></span>
+              <select id="translate-out" aria-label="Send in"><option value="">As written</option></select>
+            </label>
+            <button id="mic" class="icon-btn" type="button" title="Voice message" aria-label="Record a voice message"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg></button>
+            <button class="send-btn" type="submit" title="Send" aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12l16-8-6 16-2-6z"/></svg></button>
+          </form>
+        </div>
+      </section>
+
+      <section id="view-calls" class="view hidden">
+        <header class="view-head">
+          <button type="button" class="icon-btn back" data-back aria-label="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+          <h2>Calls</h2>
+        </header>
+        <p class="muted small view-note">FabVoice™ and FabVid™ calls are end-to-end encrypted. Start one from any chat, or call back from here.</p>
+        <ul id="call-log" class="call-log"></ul>
+      </section>
+
+      <section id="view-settings" class="view hidden">
+        <header class="view-head">
+          <button type="button" class="icon-btn back" data-back aria-label="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+          <h2>Settings</h2>
+        </header>
+        <div class="settings">
+          <div class="profile-card">
+            <button type="button" id="settings-photo" class="photo-btn" aria-label="Profile photo"><div id="settings-avatar" class="avatar big" aria-hidden="true"></div></button>
+            <div>
+              <div id="settings-handle" class="peer" translate="no"></div>
+              <div id="settings-device" class="muted small"></div>
+              <div class="photo-actions">
+                <button type="button" class="ghost small" id="photo-pick">Add photo</button>
+                <button type="button" class="ghost small hidden" id="photo-remove">Remove</button>
+              </div>
+              <input type="file" id="photo-file" accept="image/*" hidden />
+            </div>
+          </div>
+          <p class="muted small photo-note">Your photo goes end-to-end encrypted to the people you chat with. The relay never sees it.</p>
+          <div class="chat-prefs" id="chat-prefs">
+            <h3 class="eyebrow">Chats</h3>
+            <label class="pref"><input type="checkbox" id="pref-receipts" /><span>Read receipts<small>If off, you won't send or see read receipts.</small></span></label>
+            <label class="pref"><input type="checkbox" id="pref-typing" /><span>Typing indicator<small>Let people see when you're writing to them.</small></span></label>
+            <label class="pref"><input type="checkbox" id="pref-notify" /><span>Notifications<small>New messages while the app is in the background. Muted chats stay quiet.</small></span></label>
+            <label class="pref pref-select"><span>Theme</span><select id="pref-theme"><option value="light">Light (default)</option><option value="dark">Dark</option><option value="system">Match this device</option></select></label>
+          </div>
+          <div class="chat-prefs hidden" id="number-card">
+            <h3 class="eyebrow">Your phone number</h3>
+            <p class="muted small">Link the number on your phone so FabriC++ users who call or text it reach you end-to-end encrypted instead. The relay keeps only a keyed hash of it, never the number. Calls and texts from regular phones still go over the phone network, unencrypted.</p>
+            <form id="number-form" class="row number-form">
+              <input id="number-input" class="text-input" type="tel" inputmode="tel" autocomplete="tel" placeholder="+1 555 123 4567" aria-label="Your phone number" />
+              <button class="primary" type="submit">Send code</button>
+            </form>
+            <form id="code-form" class="row number-form hidden">
+              <input id="code-input" class="text-input mono" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="Code from the text" aria-label="Code from the text" />
+              <button class="primary" type="submit">Confirm</button>
+              <button id="code-cancel" class="ghost" type="button">Cancel</button>
+            </form>
+            <div id="number-linked" class="hidden">
+              <div class="number-row"><strong id="number-mine"></strong><span id="number-when" class="muted small"></span></div>
+              <label class="pref"><input type="checkbox" id="number-discoverable" /><span>Let people find me by my number<small>FabriC++ users who have your number can call or message you here, encrypted. Off: looking up your number finds no one.</small></span></label>
+              <button id="number-unlink" class="ghost" type="button">Unlink number</button>
+            </div>
+            <p id="number-msg" class="small" role="status"></p>
+          </div>
+          <ul class="settings-list">
+            <li><button type="button" data-go="security" data-focus="sec-card"><span>Privacy and security</span><small>Passphrase, app lock, safety numbers</small></button></li>
+            <li><button type="button" data-go="security" data-focus="dev-card"><span>Linked devices</span><small>Phones and computers on this account</small></button></li>
+            <li><button type="button" data-go="security" data-focus="backup-card"><span>Chat backup</span><small>Encrypted backup and restore</small></button></li>
+            <li><button type="button" data-go="security" data-focus="ai-card"><span>Translation and on-device AI</span><small>Translate, summaries, suggested replies</small></button></li>
+            <li><button type="button" data-go="phone"><span>Phone numbers</span><small>Your number, call and text log</small></button></li>
+            <li><button type="button" data-go="earn"><span>Earn</span><small>Opt-in research, payouts, receipts</small></button></li>
+            <li><button type="button" id="bots-settings"><span>Bots</span><small>Make a bot with +forgebot and get its Bot API token</small></button></li>
+            <li class="lang-row"><div><span>Language</span><small>App language. Messages you receive translate into it.</small></div><div id="lang-switch"></div></li>
+          </ul>
+          <p class="muted small settings-about">FabriC++™ by Infinitum Corporation. Messages and calls are end-to-end encrypted; the relay can't read them.</p>
+        </div>
+      </section>
+
+      <section id="view-phone" class="view hidden">
+        <header class="view-head sub">
+          <button type="button" class="icon-btn back" data-back aria-label="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+          <h2>Phone</h2>
+        </header>
+        <div class="earn">
+          <header>
+            <h2>A real phone number.</h2>
+            <p class="muted">Call and text any phone from FabriC++. These go over the ordinary phone network through the relay's carrier (Twilio), so unlike FabriC++ chats and calls they are <strong>not end-to-end encrypted</strong>: the carriers can hear calls and read texts, and the relay keeps your phone history and texts for 30 days to sync your devices.</p>
+          </header>
+          <div id="phone-off" class="card">
+            <h3>Not set up on this relay</h3>
+            <p class="muted small">The relay operator turns this on with a Twilio account and assigns numbers to accounts. See the README's FabriC++ Phone section.</p>
+          </div>
+          <div id="phone-on" class="grid hidden">
+            <div class="card">
+              <h3>Your number</h3>
+              <div id="phone-number" class="phone-number">…</div>
+              <p id="phone-number-note" class="muted small"></p>
+            </div>
+            <div class="card">
+              <h3>Call or text</h3>
+              <label class="phone-from muted small">From <select id="phone-from" aria-label="Call or text from"></select></label>
+              <form id="phone-dial" class="phone-dial">
+                <input id="phone-to" type="tel" inputmode="tel" autocomplete="off" placeholder="+1 555 123 4567" aria-label="Phone number" />
+                <button id="phone-call" class="primary" type="submit">Call</button>
+              </form>
+              <div id="phone-pad"></div>
+              <textarea id="phone-text" rows="2" maxlength="1600" placeholder="Text message" aria-label="Text message"></textarea>
+              <div class="row"><button id="phone-sms" class="ghost" type="button">Send text</button></div>
+              <p id="phone-line-note" class="muted small"></p>
+              <p id="phone-note" class="muted small" role="status"></p>
+            </div>
+            <div class="card wide">
+              <h3>History</h3>
+              <p id="phone-empty" class="muted small">No calls or texts yet.</p>
+              <ul id="phone-log" class="phone-log"></ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-earn" class="view hidden">
+        <header class="view-head sub">
+          <button type="button" class="icon-btn back" data-back aria-label="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+          <h2>Earn</h2>
+        </header>
+        <div class="earn">
+          <header>
+            <h2>Your data, your choice.</h2>
+            <p class="muted">Opt in by purpose. Only aggregate metadata counts are used — protected conversation contents are never monetized. Participating users share 70% of eligible net revenue, paid in $FAB to FIRM Wallet.</p>
+          </header>
+          <div class="grid">
+            <div class="card">
+              <h3>Participation</h3>
+              <div id="purposes"></div>
+            </div>
+            <div class="card">
+              <h3>Balance</h3>
+              <div class="balance"><span id="balance">0</span> <span class="unit">$FAB</span></div>
+              <div id="counters" class="muted small"></div>
+              <h4>Payouts</h4>
+              <ul id="payouts" class="list small"></ul>
+            </div>
+            <div class="card wide">
+              <h3>Revenue split preview</h3>
+              <form id="preview-form" class="row">
+                <label>Eligible net revenue $ <input id="revenue" type="number" min="0" step="100" value="100000" /></label>
+                <button class="ghost" type="submit">Preview</button>
+                <button id="settle" class="ghost" type="button" title="Operator action, localhost only">Run demo settlement</button>
+              </form>
+              <table class="split">
+                <tbody id="split"></tbody>
+              </table>
+              <p class="muted small">Allocations are weighted by contribution. Each settlement is recorded on a hash-chained ledger (prototype stand-in for Firmament Network).</p>
+            </div>
+            <div class="card wide">
+              <h3>Consent receipts</h3>
+              <ul id="receipts" class="list small mono"></ul>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section id="view-security" class="view hidden">
+        <header class="view-head sub">
+          <button type="button" class="icon-btn back" data-back aria-label="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+          <h2>Privacy and security</h2>
+        </header>
+        <div class="earn">
+          <header>
+            <h2>Keys on this device.</h2>
+            <p class="muted">FabriC++ keeps your keys and history only here, encrypted. Nobody, including Infinitum, can recover them if you lose this device or forget your passphrase.</p>
+          </header>
+          <div class="grid">
+            <div class="card wide">
+              <h3>Status</h3>
+              <table class="split sec"><tbody id="sec-status"></tbody></table>
+            </div>
+            <div id="sec-card" class="card wide">
+              <h3>Passphrase</h3>
+              <form id="sec-form" class="sec-form">
+                <label id="sec-current-row" class="field hidden"><span>Current passphrase</span>
+                  <input id="sec-current" class="text-input" type="password" autocomplete="current-password" /></label>
+                <label class="field"><span>New passphrase</span>
+                  <input id="sec-new" class="text-input" type="password" autocomplete="new-password" /></label>
+                <label class="field"><span>Confirm</span>
+                  <input id="sec-confirm" class="text-input" type="password" autocomplete="new-password" /></label>
+                <div class="row">
+                  <button id="sec-submit" class="primary" type="submit">Set passphrase</button>
+                  <button id="sec-remove" class="ghost hidden" type="button">Remove passphrase</button>
+                  <button id="sec-lock" class="ghost hidden" type="button">Lock now</button>
+                </div>
+                <p id="sec-msg" class="small"></p>
+              </form>
+            </div>
+            <div id="dev-card" class="card wide">
+              <h3>Devices</h3>
+              <p class="muted small">Each device has its own keys. Contacts see every device on your list, signed by your account key, which only the primary holds.</p>
+              <ul id="dev-list" class="devices"></ul>
+              <form id="dev-link-form" class="row">
+                <input id="dev-code" class="text-input mono" autocomplete="off" spellcheck="false" placeholder="Paste a link code (FAB1.…)" />
+                <button class="primary" type="submit">Link a device</button>
+                <button id="dev-scan" class="ghost" type="button">Scan QR code</button>
+              </form>
+              <div id="dev-scanner" class="scanner hidden">
+                <video id="dev-video" playsinline muted></video>
+                <p class="muted small">Point the camera at the QR code on the new device. <button id="dev-scan-stop" class="link" type="button">Cancel</button></p>
+              </div>
+              <div id="dev-confirm" class="confirm hidden">
+                <p>Does the new device show this number?</p>
+                <div id="dev-sas" class="sas"></div>
+                <p class="muted small">If the numbers differ, cancel: the code may have been tampered with.</p>
+                <div class="row"><button id="dev-sas-ok" class="primary" type="button">Yes, link it</button><button id="dev-sas-no" class="ghost" type="button">No, cancel</button></div>
+              </div>
+              <p id="dev-linked-note" class="muted small hidden">Linking and removing devices is done on your primary device.</p>
+              <p id="dev-msg" class="small"></p>
+            </div>
+            <div id="ai-card" class="card wide">
+              <h3>On-device AI</h3>
+              <p class="muted small">Summaries, translation and suggested replies run on this device. They use the model built into the browser where there is one (Gemini Nano in Chrome); elsewhere (Firefox, Safari, phones) they use open models (Opus-MT for translation, Qwen2.5 0.5B for summaries and replies) that this relay passes through, downloaded once. Either way your messages never leave this device, and Infinitum never sees them. The relay can tell which models you download.</p>
+              <table class="split sec"><tbody id="ai-status"></tbody></table>
+              <label class="purpose"><input id="ai-replies" type="checkbox" /><span><b>Suggest replies</b><span class="muted small">Up to three short replies under the composer when someone writes to you. Nothing is sent until you choose one and press Send.</span></span></label>
+              <label class="purpose"><input id="ai-translate-all" type="checkbox" /><span><b>Translate automatically</b><span class="muted small">Messages, group chats, bot replies and posts in channels that are in another language are translated into yours on this device, with the original a tap away. Nothing is sent anywhere to be translated. Turn it off for one chat from the chat's menu.</span></span></label>
+              <div class="row"><button id="ai-download" class="ghost" type="button">Download models</button></div>
+              <p id="ai-msg" class="small"></p>
+            </div>
+            <div id="cid-card" class="card wide hidden">
+              <h3>Cumulus://ID</h3>
+              <p class="muted small">Your Infinitum account. Linked, it can keep your encrypted backup and find it when you sign in on a new device. Cumulus never gets a key that can read your messages: a restore still needs your recovery key. Contacts don't see your CID.</p>
+              <table class="split sec"><tbody id="cid-status"></tbody></table>
+              <div class="row"><button id="cid-link" class="primary" type="button">Link Cumulus://ID</button><button id="cid-unlink" class="ghost hidden" type="button">Unlink</button></div>
+              <p id="cid-primary-note" class="muted small hidden">Linking and unlinking is done on your primary device.</p>
+              <p id="cid-msg" class="small"></p>
+            </div>
+            <div id="backup-card" class="card wide">
+              <h3>Backup</h3>
+              <p class="muted small">An encrypted file with your account key, contacts and message history, plus a recovery key shown once. Keep them apart. Anyone with both can take over your account.</p>
+              <form id="backup-form" class="row">
+                <label id="backup-pass-row" class="hidden"><input id="backup-pass" class="text-input" type="password" autocomplete="current-password" placeholder="Passphrase" /></label>
+                <input id="backup-reuse" class="text-input mono" autocomplete="off" spellcheck="false" placeholder="Existing recovery key (optional)" />
+                <button class="primary" type="submit">Download backup file</button>
+                <button id="backup-cloud" class="ghost hidden" type="button">Save to Cumulus</button>
+              </form>
+              <div id="backup-result" class="hidden">
+                <p class="small">Recovery key — write it down now, it is not stored anywhere:</p>
+                <div class="code-box"><code id="backup-key"></code></div>
+              </div>
+              <p id="backup-msg" class="small"></p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="call" class="call hidden" role="dialog" aria-label="Call">
+    <div id="call-grid" class="call-grid"></div>
+    <video id="local-video" class="local-video hidden" autoplay playsinline muted></video>
+    <div class="call-info">
+      <div id="call-peer" class="call-peer"></div>
+      <div id="call-status" class="call-status"></div>
+      <div id="call-e2ee" class="muted small"></div>
+    </div>
+    <div id="call-add" class="call-add hidden">
+      <select id="call-add-who" aria-label="Person to add"></select>
+      <span id="call-add-none" class="muted small hidden">Everyone in your contacts is already here.</span>
+      <button id="call-add-go" class="primary" type="button">Ring</button>
+      <button id="call-add-cancel" class="ghost" type="button">Cancel</button>
+    </div>
+    <div class="call-controls">
+      <button id="call-accept-video" class="primary hidden" type="button">Accept with video</button>
+      <button id="call-accept-voice" class="primary hidden" type="button">Accept</button>
+      <button id="call-decline" class="danger hidden" type="button">Decline</button>
+      <button id="call-mute" class="ghost hidden" type="button">Mute</button>
+      <button id="call-cam" class="ghost hidden" type="button">Camera on</button>
+      <button id="call-screen" class="ghost hidden" type="button">Share screen</button>
+      <button id="call-add-open" class="ghost hidden" type="button">Add person</button>
+      <button id="call-end" class="danger hidden" type="button">Hang up</button>
+    </div>
+  </div>
+
+  <div id="phone-call-bar" class="phone-call-bar hidden" role="dialog" aria-label="Phone call">
+    <div>
+      <div id="phone-call-who" class="phone-call-who"></div>
+      <div id="phone-call-status" class="muted small"></div>
+    </div>
+    <div class="phone-call-actions">
+      <button id="phone-answer" class="primary hidden" type="button">Answer</button>
+      <button id="phone-decline" class="danger hidden" type="button">Decline</button>
+      <button id="phone-keypad" class="ghost" type="button" aria-expanded="false" aria-controls="phone-call-pad">Keypad</button>
+      <button id="phone-mute" class="ghost" type="button">Mute</button>
+      <button id="phone-hangup" class="danger" type="button">Hang up</button>
+    </div>
+    <div id="phone-call-tones" class="phone-call-tones hidden" aria-live="polite"></div>
+    <div id="phone-call-pad" class="hidden"></div>
+  </div>
+
+  <div id="msg-menu" class="msg-menu hidden" role="menu" aria-label="Message actions">
+    <div id="msg-react" class="msg-react"></div>
+    <button id="msg-reply" type="button" role="menuitem">Reply</button>
+    <button id="msg-copy" type="button" role="menuitem">Copy</button>
+    <button id="msg-forward" type="button" role="menuitem">Forward</button>
+    <button id="msg-edit" type="button" role="menuitem">Edit</button>
+    <button id="msg-delete-me" type="button" role="menuitem">Delete for me</button>
+    <button id="msg-delete-all" class="danger-text" type="button" role="menuitem">Delete for everyone</button>
+  </div>
+
+  <dialog id="fwd-dialog" class="fwd-dialog" aria-label="Forward to">
+    <h3>Forward to</h3>
+    <ul id="fwd-list" class="fwd-list"></ul>
+    <button id="fwd-cancel" class="ghost" type="button">Cancel</button>
+  </dialog>
+
+  <div id="chat-menu" class="msg-menu hidden" role="menu" aria-label="Chat actions">
+    <button id="chat-pin" type="button" role="menuitem">Pin chat</button>
+    <button id="chat-mute" type="button" role="menuitem">Mute</button>
+    <button id="chat-archive" type="button" role="menuitem">Archive</button>
+    <button id="chat-read" type="button" role="menuitem">Mark as read</button>
+    <button id="chat-delete" class="danger-text" type="button" role="menuitem">Delete chat</button>
+  </div>
+
+  <dialog id="group-dialog" class="fwd-dialog" aria-label="New group">
+    <h3 id="group-dialog-title">New group</h3>
+    <label class="field"><span>Group name</span><input id="group-name" maxlength="64" autocomplete="off" placeholder="Team" /></label>
+    <div class="eyebrow" id="group-pick-label">Members</div>
+    <ul id="group-pick" class="fwd-list pick-list"></ul>
+    <p id="group-error" class="error small"></p>
+    <div class="dialog-actions">
+      <button id="group-cancel" class="ghost" type="button">Cancel</button>
+      <button id="group-create" class="primary" type="button">Create group</button>
+    </div>
+  </dialog>
+
+  <dialog id="ginfo-dialog" class="fwd-dialog" aria-label="Group info">
+    <h3>Group info</h3>
+    <label class="field"><span>Name</span><span class="row-inline"><input id="ginfo-name" maxlength="64" autocomplete="off" /><button id="ginfo-rename" class="ghost" type="button">Save</button></span></label>
+    <div class="eyebrow" id="ginfo-count">Members</div>
+    <ul id="ginfo-members" class="fwd-list"></ul>
+    <div class="dialog-actions">
+      <button id="ginfo-add" class="ghost" type="button">Add members</button>
+      <button id="ginfo-leave" class="danger" type="button">Leave group</button>
+      <button id="ginfo-close" class="ghost" type="button">Close</button>
+    </div>
+  </dialog>
+
+  <div id="viewer" class="viewer hidden" role="dialog" aria-label="Photo"><img id="viewer-img" alt="Photo" /></div>
+
+  <dialog id="new-sheet" class="sheet" aria-label="Start something new">
+    <div class="sheet-grab" aria-hidden="true"></div>
+    <button type="button" class="sheet-item" data-new="text"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg></span><span><strong>FabText<sup>™</sup></strong><small>Message, photo, file or voice note · encrypted</small></span></button>
+    <button type="button" class="sheet-item" data-new="voice"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a1 1 0 01-1 1A16 16 0 014 5a1 1 0 011-1z"/></svg></span><span><strong>FabVoice<sup>™</sup></strong><small>Voice call · end-to-end encrypted</small></span></button>
+    <button type="button" class="sheet-item" data-new="video"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12"/><path d="M16 10l5-3v10l-5-3"/></svg></span><span><strong>FabVid<sup>™</sup></strong><small>Video call · end-to-end encrypted</small></span></button>
+    <button type="button" class="sheet-item" data-new="group"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 19c0-3 3-5 6-5s6 2 6 5M16 5a3 3 0 010 6M18 14c2 .6 3 2.4 3 5"/></svg></span><span><strong>New group</strong><small>Up to 64 people</small></span></button>
+    <button type="button" class="sheet-item" data-new="phone"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2" width="10" height="20"/><path d="M11 18h2"/></svg></span><span><strong>Call a phone number</strong><small>Encrypted when they're on FabriC++</small></span></button>
+    <div class="sheet-sep" aria-hidden="true"></div>
+    <button type="button" class="sheet-item" data-new="calls"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span><span><strong>Recent calls</strong><small>Call history</small></span></button>
+    <button type="button" class="sheet-item" data-new="settings"><span class="sheet-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></span><span><strong>Settings</strong><small>Account, devices, privacy, appearance</small></span></button>
+    <button type="button" class="sheet-cancel" data-new="cancel">Cancel</button>
+  </dialog>
+
+  <dialog id="num-dialog" class="fwd-dialog" aria-label="Call or message a phone number">
+    <h3>Call a phone number</h3>
+    <form id="num-form" class="num-form">
+      <input id="num-input" class="dial-display" type="tel" inputmode="tel" autocomplete="off" placeholder="Enter a number" aria-label="Phone number" />
+      <div id="num-pad"></div>
+      <button class="primary dial-call" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a1 1 0 01-1 1A16 16 0 014 5a1 1 0 011-1z"/></svg>Call</button>
+    </form>
+    <div id="num-result" class="num-result" role="status"></div>
+    <button id="num-close" class="ghost" type="button">Close</button>
+  </dialog>
+
+  <dialog id="pick-dialog" class="fwd-dialog" aria-label="Choose a contact">
+    <h3 id="pick-title">Choose</h3>
+    <ul id="pick-list" class="fwd-list"></ul>
+    <button id="pick-cancel" class="ghost" type="button">Cancel</button>
+  </dialog>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script type="module" src="/app.js"></script>
+    <dialog id="photo-dialog" class="fwd-dialog photo-dialog">
+      <h3>Profile photo</h3>
+      <img id="photo-preview" class="photo-preview" alt="Preview of your profile photo" />
+      <label class="field"><span>Zoom</span><input type="range" id="photo-zoom" min="1" max="3" step="0.05" value="1" /></label>
+      <div id="photo-move" class="photo-move" role="group" aria-label="Move the crop">
+        <button type="button" class="ghost small" data-nudge="-1,0" aria-label="Move left">←</button>
+        <button type="button" class="ghost small" data-nudge="0,-1" aria-label="Move up">↑</button>
+        <button type="button" class="ghost small" data-nudge="0,1" aria-label="Move down">↓</button>
+        <button type="button" class="ghost small" data-nudge="1,0" aria-label="Move right">→</button>
+      </div>
+      <div class="dialog-actions"><button type="button" class="ghost" id="photo-cancel">Cancel</button><button type="button" class="primary" id="photo-use">Use photo</button></div>
+    </dialog>
+</body>
+</html>

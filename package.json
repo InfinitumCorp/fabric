@@ -1,0 +1,25 @@
+{
+  "name": "fabric",
+  "version": "0.15.0",
+  "private": true,
+  "description": "FABRIC™ — Infinitum secure communications & opt-in data economy (prototype)",
+  "type": "module",
+  "scripts": {
+    "start": "node server/relay.js",
+    "test": "node --test --test-timeout=30000 \"test/*.test.js\"",
+    "cid-dev": "node server/cid-dev.js",
+    "sfu-node": "node server/sfu-node.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
+    "@huggingface/transformers": "^4.3.2",
+    "@noble/post-quantum": "^0.7.1",
+    "@twilio/voice-sdk": "^2.18.5",
+    "jsqr": "1.4.0",
+    "werift": "^0.26.0",
+    "ws": "^8.22.1"
+  }
+}

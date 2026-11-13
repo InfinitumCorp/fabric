@@ -1,4 +1,9 @@
 node_modules/
+data/
+repos/
+android/out/
+android/dist/
+*.env
 app/node_modules/
 *.log
 .expo/

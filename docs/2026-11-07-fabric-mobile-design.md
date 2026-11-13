@@ -154,7 +154,7 @@ This spec uses those values: 70% contributor share, 14-day hold, Personal free, 
 - The app reads entitlements from the revenue API (`entitlements`, `subscriptions/checkout`, `billing/portal` endpoints described in the revenue README). The app never holds Stripe keys.
 - Personal: all release-1 features, free.
 - Business: per-seat plan for organizations. Release 1 implements entitlement checks and the upgrade path against the revenue API with its fake payment provider. Business-only features (admin console, retention policies, compliance export) are built as separate, later items; until each exists it is not listed as included in the app. Included minutes are not shown because FABRIC calling does not exist.
-- Live checkout is disabled until a person approves Stripe configuration (keys, webhook, tax). The UI shows "Not available yet" rather than a working purchase.
+- Checkout and the billing portal run through the central revenue Worker (`infinitum-revenue`, InfinitumCorp/infinitum-revenue#23), which holds the Stripe keys. The app sends the person's Cumulus ID access token; Upgrade to Business calls `POST /v1/me/org` (`kind: business`) and then `POST /v1/subscriptions/checkout` with the seat count. Whether charges are live is decided by the Stripe configuration in that Worker, not by the app.
 - App store rules for in-app digital subscriptions are a decision for the owner (section 13); this spec does not assume web checkout is allowed inside the iOS or Android app.
 
 ### 10.4 Opt-in data revenue

@@ -1,6 +1,7 @@
 package app.infinitumfabric.client.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +18,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -30,10 +32,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import app.infinitumfabric.client.FabricViewModel
 import app.infinitumfabric.client.Screen
+import app.infinitumfabric.client.domain.formatPlanPrice
 import app.infinitumfabric.client.domain.formatUsdFromCents
 
 @Composable
-fun FabricApp(model: FabricViewModel) {
+fun FabricApp(model: FabricViewModel, openCumulusId: (create: Boolean) -> Unit = {}) {
     BackHandler(enabled = model.screen !is Screen.SignIn && model.screen !is Screen.Chats) {
         model.back()
     }
@@ -56,7 +59,7 @@ fun FabricApp(model: FabricViewModel) {
             model.notice?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             HorizontalDivider(color = Line, thickness = 1.dp)
             when (val screen = model.screen) {
-                Screen.SignIn -> SignIn(model)
+                Screen.SignIn -> SignIn(model, openCumulusId)
                 Screen.Chats -> Chats(model)
                 is Screen.Conversation -> Conversation(model, screen.handle)
                 Screen.NewChat -> NewChat(model)
@@ -79,34 +82,52 @@ fun LockedScreen() {
 }
 
 @Composable
-private fun SignIn(model: FabricViewModel) {
+private fun SignIn(model: FabricViewModel, openCumulusId: (create: Boolean) -> Unit) {
     Text("Sign in", style = MaterialTheme.typography.titleMedium)
     Text(
-        "No password is stored in the app. Continue checks the relay health endpoint. " +
-            "Account registration needs a signed device list, which this build does not create.",
+        "FabriC++ signs you in with your Cumulus ID. No password is stored in the app.",
         style = MaterialTheme.typography.bodySmall,
     )
-    OutlinedTextField(
-        value = model.baseUrl,
-        onValueChange = model::updateBaseUrl,
+    Button(
+        onClick = { openCumulusId(false) },
+        enabled = !model.busy,
         modifier = Modifier
             .fillMaxWidth()
-            .testTag("homeserver"),
-        label = { Text("Relay") },
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-    )
-    OutlinedTextField(
-        value = model.handle,
-        onValueChange = model::updateHandle,
+            .testTag("cid-sign-in"),
+        shape = MaterialTheme.shapes.small,
+        colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Paper),
+    ) { Text("Sign in with Cumulus ID") }
+    OutlinedButton(
+        onClick = { openCumulusId(true) },
+        enabled = !model.busy,
         modifier = Modifier
             .fillMaxWidth()
-            .testTag("handle"),
-        label = { Text("Handle, optional") },
-        placeholder = { Text("@name.veil") },
-        singleLine = true,
+            .testTag("cid-create"),
+        shape = MaterialTheme.shapes.small,
+        border = BorderStroke(1.dp, Ink),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink),
+    ) { Text("Create a Cumulus ID") }
+    Text(
+        "No Cumulus ID yet? Create one in the same step. You come back here signed in.",
+        style = MaterialTheme.typography.bodySmall,
     )
-    PrimaryButton("Continue", model::continueFromSignIn, enabled = !model.busy)
+    TextButton(onClick = model::toggleAdvanced, modifier = Modifier.testTag("advanced")) {
+        Text(if (model.showAdvanced) "Hide advanced" else "Advanced", color = Accent)
+    }
+    if (model.showAdvanced) {
+        OutlinedTextField(
+            value = model.baseUrl,
+            onValueChange = model::updateBaseUrl,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("homeserver"),
+            label = { Text("Relay") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+        )
+        TextButton(onClick = model::checkRelay, enabled = !model.busy) { Text("Check relay", color = Accent) }
+        Text("Cumulus ID ${model.cidIssuer}", style = MaterialTheme.typography.bodySmall)
+    }
 }
 
 @Composable
@@ -169,7 +190,8 @@ private fun Contact(model: FabricViewModel, handle: String) {
 private fun Plan(model: FabricViewModel) {
     NavRow(model)
     Text("Plan", style = MaterialTheme.typography.titleMedium)
-    Text("Personal is free. Live checkout is not available yet.", style = MaterialTheme.typography.bodySmall)
+    if (model.billingEnabled) Billing(model) else Text("Personal is free.", style = MaterialTheme.typography.bodySmall)
+    HorizontalDivider(color = Line, thickness = 1.dp)
     val preview = model.preview
     if (preview == null) {
         Text("No preview yet.", style = MaterialTheme.typography.bodySmall)
@@ -180,6 +202,72 @@ private fun Plan(model: FabricViewModel) {
         Text("Participants ${preview.participants}. FAB per USD ${preview.fabPerUsd}.")
         Text("Per-person amounts stay on the signed-in socket. This screen does not settle.", style = MaterialTheme.typography.bodySmall)
     }
+}
+
+/** Plans and billing: FABRIC plans from the revenue API; Stripe pages open in a Custom Tab. */
+@Composable
+private fun Billing(model: FabricViewModel) {
+    val current = model.entitlement
+    val plans = model.billingPlans
+    if (current != null) {
+        val name = plans.firstOrNull { it.id == current.plan }?.name ?: current.plan
+        val seats = if (current.seats > 1) " · ${current.seats} seats" else ""
+        Text("Current plan: $name · ${current.status}$seats", modifier = Modifier.testTag("current-plan"))
+    }
+    if (plans.isEmpty()) Text("No plans loaded.", style = MaterialTheme.typography.bodySmall)
+    val needsSeats = plans.any { it.perSeat && it.id != current?.plan && it.priceCents > 0 }
+    val needsOrg = plans.any { it.businessOnly && it.id != current?.plan && it.priceCents > 0 }
+    if (needsOrg) {
+        OutlinedTextField(
+            value = model.orgName,
+            onValueChange = model::updateOrgName,
+            label = { Text("Organisation name") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().testTag("org-name"),
+        )
+    }
+    if (needsSeats) {
+        OutlinedTextField(
+            value = model.seats,
+            onValueChange = model::updateSeats,
+            label = { Text("Seats") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth().testTag("seats"),
+        )
+    }
+    plans.forEach { plan ->
+        HorizontalDivider(color = Line, thickness = 1.dp)
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.weight(1f)) {
+                Text(plan.name)
+                Text(formatPlanPrice(plan.priceCents, plan.interval, plan.perSeat), style = MaterialTheme.typography.bodySmall)
+                if (plan.channel == "sales_assisted") {
+                    Text("For approved organisations", style = MaterialTheme.typography.bodySmall)
+                } else if (plan.businessOnly) {
+                    Text("For organisations. Subscribing makes your account a business account.", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            when {
+                plan.id == current?.plan -> Text("Current", style = MaterialTheme.typography.bodySmall)
+                plan.priceCents == 0 -> Unit
+                else -> TextButton(
+                    onClick = { model.subscribe(plan) },
+                    enabled = !model.billingBusy,
+                    modifier = Modifier.testTag("subscribe-${plan.id}"),
+                ) { Text("Subscribe", color = Accent) }
+            }
+        }
+    }
+    HorizontalDivider(color = Line, thickness = 1.dp)
+    OutlinedButton(
+        onClick = model::manageBilling,
+        enabled = !model.billingBusy,
+        modifier = Modifier.fillMaxWidth().testTag("manage-billing"),
+        shape = MaterialTheme.shapes.small,
+        border = BorderStroke(1.dp, Ink),
+    ) { Text(if (model.billingBusy) "Opening…" else "Manage billing", color = Ink) }
+    Text("Payments are processed by Stripe through Infinitum. FabriC++ never sees your card.", style = MaterialTheme.typography.bodySmall)
 }
 
 @Composable
@@ -213,6 +301,7 @@ private fun Data(model: FabricViewModel) {
 private fun Settings(model: FabricViewModel) {
     NavRow(model)
     Text("Settings", style = MaterialTheme.typography.titleMedium)
+    model.profile?.let { Text("Signed in with Cumulus ID as ${it.display}.") }
     Text("Relay ${model.baseUrl}", style = MaterialTheme.typography.bodySmall)
     val ledger = model.ledger
     val relay = model.relay
@@ -226,6 +315,14 @@ private fun Settings(model: FabricViewModel) {
         Text("On-device models listed: ${relay.modelsAvailable}.")
     }
     Text("Devices: none registered from this build.", style = MaterialTheme.typography.bodySmall)
+    if (model.billingEnabled) {
+        OutlinedButton(
+            onClick = { model.open(Screen.Plan) },
+            modifier = Modifier.fillMaxWidth().testTag("open-billing"),
+            shape = MaterialTheme.shapes.small,
+            border = BorderStroke(1.dp, Ink),
+        ) { Text("Plans and billing", color = Ink) }
+    }
     PrimaryButton("Sign out", model::signOut)
 }
 

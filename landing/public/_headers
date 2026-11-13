@@ -2,3 +2,18 @@
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   X-Frame-Options: DENY
+
+/.well-known/assetlinks.json
+  Content-Type: application/json
+  Access-Control-Allow-Origin: *
+
+/cid/*
+  Cache-Control: no-store
+  Referrer-Policy: no-referrer
+
+/billing/*
+  Cache-Control: no-store
+  Referrer-Policy: no-referrer
+
+/account*
+  Cache-Control: no-store

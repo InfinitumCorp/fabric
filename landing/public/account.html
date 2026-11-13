@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<!-- Infinitum revenue API (plans, Checkout, portal). Change here for a mirror; HTTPS only. -->
+<meta name="revenue-url" content="https://infinitum-revenue.infinitumcorp.workers.dev">
+<title>FABRIC · Plan and billing</title>
+<meta name="theme-color" content="#ffffff">
+<style>:root{--paper:#fff;--ink:#111820;--muted:#52606b;--line:#d6dce1;--accent:#2454dd;color-scheme:light}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;color:var(--ink);background:var(--paper);font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:16px;line-height:1.55;letter-spacing:-.011em}
+a{color:inherit}a:hover{color:var(--accent)}
+a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+header,main,footer{max-width:1080px;margin:0 auto;padding:0 24px}
+header{display:flex;justify-content:space-between;align-items:center;column-gap:24px;height:72px;border-bottom:1px solid var(--line)}
+.wordmark{font-size:20px;letter-spacing:-.03em;text-decoration:none}
+sup.tm{font-size:.38em;vertical-align:super;line-height:0;margin-left:.08em;letter-spacing:0;font-weight:400}
+.cumulus-bar{display:inline-flex;align-items:center;flex-shrink:0;max-width:100%;margin-left:auto}
+main{padding-top:56px;padding-bottom:96px;max-width:720px}
+h1{font-size:40px;font-weight:400;letter-spacing:-.04em;margin:0 0 8px}
+.muted{color:var(--muted)}
+ul.plans{list-style:none;padding:0;margin:24px 0;border-top:1px solid var(--ink)}
+ul.plans li{display:flex;justify-content:space-between;gap:16px;padding:16px 0;border-bottom:1px solid var(--line)}
+.current{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-left:8px}
+form{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}
+label{display:flex;flex-direction:column;font-size:13px;color:var(--muted);gap:4px}
+input{font:inherit;height:44px;border:1px solid var(--line);padding:0 12px;color:var(--ink);background:var(--paper)}
+input[name=org]{width:280px;max-width:100%}input[name=seats]{width:96px}
+button{font:inherit;height:44px;align-self:flex-end;padding:0 20px;border:1px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer}
+button.primary{background:var(--ink);color:#fff}button.primary:hover{background:var(--accent);border-color:var(--accent)}
+button:disabled{opacity:.5;cursor:default}
+.err{color:#b3261e}
+[hidden]{display:none!important}
+footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;padding-top:24px;padding-bottom:40px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
+@media (max-width:720px){header{height:auto;min-height:72px;flex-wrap:wrap;gap:8px 16px;padding-top:8px;padding-bottom:8px}}</style>
+</head>
+<body>
+<header><a class="wordmark" href="/" aria-label="FABRIC home">FABRIC<sup class="tm">™</sup></a><div class="cumulus-bar" data-cumulus-bar></div></header>
+<main id="main">
+<h1>Plan and billing</h1>
+<p class="muted" id="current">Sign in with your Cumulus://ID to see your plan and upgrade.</p>
+<p id="notice" role="status" hidden></p>
+<ul class="plans" id="plans" aria-label="FABRIC plans"></ul>
+<section id="upgrade" hidden>
+<p class="muted">FABRIC Business is for organisations. Upgrading turns your account into a business account, then opens secure checkout for the seats you choose.</p>
+<form id="upgrade-form">
+<label>Organisation name<input name="org" autocomplete="organization" maxlength="200"></label>
+<label>Seats<input name="seats" type="number" min="1" max="10000" value="1" inputmode="numeric"></label>
+<button class="primary" type="submit" id="upgrade-btn">Upgrade to Business</button>
+</form>
+</section>
+<p><button type="button" id="portal" hidden>Manage billing</button></p>
+<p class="err" id="error" role="alert" hidden></p>
+<p class="muted">Payments are processed by Stripe through Infinitum. FABRIC never sees your card.</p>
+</main>
+<footer><span>© 2026 Infinitum Corporation<sup class="tm">®</sup></span><span><a href="https://infinitumcorporation.ai/privacy-policy">Privacy</a> · <a href="https://infinitumcorporation.ai/terms-of-use">Terms</a></span></footer>
+<script src="/cumulus-bar.js" data-client="fabric" data-issuer="https://id.cumuluscloud.app" defer></script>
+<script src="/account.js" defer></script>
+</body>
+</html>

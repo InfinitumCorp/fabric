@@ -1,0 +1,31 @@
+name: App core
+
+on:
+  push:
+    paths: ["app/**", "landing/**", ".github/workflows/app-core.yml"]
+  pull_request:
+    paths: ["app/**", "landing/**", ".github/workflows/app-core.yml"]
+
+concurrency:
+  group: app-core-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      # Pure TypeScript core (no install needed): Cumulus ID, revenue/billing, rules.
+      - name: Core unit tests
+        working-directory: app
+        run: npm run test:core
+      - name: Landing scripts parse
+        run: for f in landing/public/*.js landing/public/*/*.js; do node --check "$f"; done
+      - name: No Stripe keys in clients
+        run: |
+          if grep -rnE '(pk|sk|rk)_(live|test)_[A-Za-z0-9]{8,}' app/src app/App.tsx landing/public android/app/src; then
+            echo "Stripe key found in client code"; exit 1
+          fi

@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node server/relay.js",
-    "test": "node --test --test-timeout=30000 test/",
+    "test": "node --test --test-timeout=30000 \"test/*.test.js\"",
     "cid-dev": "node server/cid-dev.js",
     "sfu-node": "node server/sfu-node.js"
   },

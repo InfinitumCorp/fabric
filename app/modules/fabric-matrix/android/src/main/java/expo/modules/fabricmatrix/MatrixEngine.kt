@@ -22,12 +22,16 @@ class MatrixEngine(private val root: File, alias: String = "fabric_store_wrap") 
   private val cache = File(root, "matrix/cache")
   var client: Client? = null
     private set
+  var messenger: Messenger? = null
+    private set
 
   private suspend fun build(homeserver: String, key: ByteArray): Client {
     data.mkdirs(); cache.mkdirs()
     return ClientBuilder()
       .homeserverUrl(homeserver)
       .slidingSyncVersionBuilder(SlidingSyncVersionBuilder.NATIVE)
+      // Creates this account's cross-signing identity so peers can resolve it (sends refuse unresolved identities).
+      .autoEnableCrossSigning(true)
       .sqliteStore(SqliteStoreBuilder(data.path, cache.path).key(key))
       .build()
   }
@@ -49,7 +53,7 @@ class MatrixEngine(private val root: File, alias: String = "fabric_store_wrap") 
         slidingSyncVersion = SlidingSyncVersion.NATIVE,
       )
     )
-    client = c
+    client = c; messenger = Messenger(c)
     return SessionIds(c.userId(), c.deviceId())
   }
 
@@ -67,19 +71,21 @@ class MatrixEngine(private val root: File, alias: String = "fabric_store_wrap") 
       JSONObject().put("a", s.accessToken).put("u", s.userId).put("d", s.deviceId).put("h", s.homeserverUrl)
         .toString().toByteArray()
     )
-    client = c
+    client = c; messenger = Messenger(c)
     return SessionIds(s.userId, s.deviceId)
   }
 
   /** Server logout best effort, then always deletes local stores, session and keys. */
   suspend fun logoutAndWipe() {
+    try { messenger?.stop() } catch (_: Exception) {}
+    messenger = null
     try { client?.logout() } catch (_: Exception) {}
     client?.destroy(); client = null
     wipeLocal()
   }
 
   private fun wipeLocal() {
-    client = null
+    client = null; messenger = null
     File(root, "matrix").deleteRecursively()
     vault.wipe()
   }

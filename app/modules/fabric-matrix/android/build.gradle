@@ -6,9 +6,16 @@ plugins {
 group = 'expo.modules.fabricmatrix'
 version = '0.1.0'
 
+// Test-only visual-inspection build: `-PfabricDiagnosticScreenshots=true` at compile time drops FLAG_SECURE on the
+// main window (never on sign-in) and shows a permanent "DIAGNOSTIC BUILD" banner. Default false. There is no runtime switch.
+def fabricDiagnosticScreenshots = (findProperty('fabricDiagnosticScreenshots') ?: 'false').toString() == 'true'
+
 android {
   namespace "expo.modules.fabricmatrix"
+  buildFeatures { buildConfig true }
   defaultConfig {
+    buildConfigField "boolean", "DIAGNOSTIC_SCREENSHOTS", fabricDiagnosticScreenshots.toString()
+    consumerProguardFiles "consumer-rules.pro"
     versionCode 1
     versionName "0.1.0"
     minSdkVersion 28

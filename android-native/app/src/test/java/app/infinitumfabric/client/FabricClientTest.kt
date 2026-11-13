@@ -18,6 +18,7 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.net.InetAddress
 import java.net.URI
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -52,7 +53,9 @@ class FabricClientTest {
                 }
             }
         }
-        server.start()
+        // Bind to 127.0.0.1 and build URLs from the port: server.url() reverse-resolves
+        // 127.0.0.1 and can return a hosts-file alias (Windows), which the loopback policy rejects.
+        server.start(InetAddress.getByName("127.0.0.1"), 0)
     }
 
     @After
@@ -88,7 +91,7 @@ class FabricClientTest {
     fun readsRelayRoutesAndNeverCallsSettle() {
         val api = FabricApi(
             http = OkHttpClient(),
-            baseUrl = server.url("/").toString(),
+            baseUrl = "http://127.0.0.1:${server.port}/",
             policy = loopback,
         )
         assertTrue(api.health().ok)
@@ -117,7 +120,7 @@ class FabricClientTest {
                 return MockResponse().setResponseCode(403).setBody("""{"error":"password=s3cret-value"}""")
             }
         }
-        val api = FabricApi(baseUrl = server.url("/").toString(), policy = loopback)
+        val api = FabricApi(baseUrl = "http://127.0.0.1:${server.port}/", policy = loopback)
         val error = assertThrows(app.infinitumfabric.client.data.ApiException::class.java) { api.health() }
         assertFalse(error.message.orEmpty().contains("s3cret-value"))
         assertTrue(redact(error.message.orEmpty()).contains("[redacted]") || !error.message.orEmpty().contains("password="))

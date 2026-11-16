@@ -9,7 +9,9 @@ package app.infinitumfabric.client.data
  * The client never calls POST /api/economy/settle.
  */
 object ApiRoutes {
-    const val DEFAULT_BASE_URL = "https://infinitumfabric.app"
+    // The relay host is DNS-only (no Cloudflare proxy) so it works in Russia without a VPN.
+    // infinitumfabric.app is the Cloudflare-proxied landing page and has no /api routes.
+    const val DEFAULT_BASE_URL = "https://relay.infinitumfabric.app"
     const val HEALTH = "/api/health"
     const val PURPOSES = "/api/purposes"
     const val PREVIEW = "/api/economy/preview?revenue=0"

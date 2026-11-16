@@ -64,8 +64,8 @@ class FabricClientTest {
     }
 
     @Test
-    fun defaultBaseUrlIsTheProductDomain() {
-        assertEquals("https://infinitumfabric.app", ApiRoutes.DEFAULT_BASE_URL)
+    fun defaultBaseUrlIsTheRelayHost() {
+        assertEquals("https://relay.infinitumfabric.app", ApiRoutes.DEFAULT_BASE_URL)
         assertEquals("arm64-v8a", app.infinitumfabric.client.data.SupportedDevices.PRIMARY_ABI)
         assertEquals(35, app.infinitumfabric.client.data.SupportedDevices.TARGET_SDK)
     }

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'self'">
+<title>FabriC++™</title>
+<style>
+  /* Same as the web client's #boot screen (public/style.css .boot), so the hand-off is seamless. */
+  html, body { margin: 0; height: 100%; background: #ffffff; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+         font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; color: #111820; -webkit-user-select: none; user-select: none; }
+  img { width: 96px; height: 96px; }
+  .brand { font-weight: 400; font-size: 34px; line-height: 1; letter-spacing: -0.05em; }
+  .brand sup { font-size: .32em; letter-spacing: 0; vertical-align: top; position: relative; top: .15em; margin-left: .05em; }
+  .offline { display: none; margin-top: 28px; text-align: center; }
+  body.down .offline { display: block; }
+  .offline p { margin: 0 0 14px; font-size: 13px; color: #52606b; }
+  button { background: #111820; color: #ffffff; border: 1px solid #111820; border-radius: 0; padding: 10px 18px; font: inherit; font-size: 13px; cursor: pointer; }
+  button:focus-visible { outline: 2px solid #2454dd; outline-offset: 2px; }
+</style>
+</head>
+<body>
+  <img src="../assets/fabric-icon.svg" alt="">
+  <div class="brand">FabriC++<sup>™</sup></div>
+  <div class="offline"><p>Can't reach the relay. Check your connection.</p><button id="retry" type="button">Try again</button></div>
+  <script src="boot.js"></script>
+</body>
+</html>

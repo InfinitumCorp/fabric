@@ -1,0 +1,88 @@
+{
+  "name": "fabric-desktop",
+  "productName": "FabriC++",
+  "version": "0.20.0",
+  "private": true,
+  "description": "FabriC++ desktop: a thin native shell around the web client the relay serves",
+  "author": "The Infinitum Corporation",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "icons": "node tools/icons.js",
+    "dist": "node tools/icons.js && electron-builder --publish never",
+    "dist:dev": "node tools/icons.js && electron-builder --publish never -c.extraMetadata.fabricDev=true -c.directories.output=dist-dev",
+    "prestart": "node tools/icons.js",
+    "predev": "node tools/icons.js",
+    "smoke": "node tools/icons.js && node test/smoke.js"
+  },
+  "devDependencies": {
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
+    "playwright-core": "^1.65.0"
+  },
+  "build": {
+    "appId": "com.infinitum.fabric",
+    "protocols": [{ "name": "FabriC++ bot link", "schemes": ["fabric"] }],
+    "productName": "FabriC++",
+    "copyright": "© The Infinitum Corporation",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "main.js",
+      "package.json",
+      "ui/**",
+      "assets/**"
+    ],
+    "icon": "assets/icon.png",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "FabriC++-Setup-${version}.${ext}",
+      "shortcutName": "FabriC++"
+    },
+    "portable": {
+      "artifactName": "FabriC++-${version}-portable.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.social-networking",
+      "icon": "assets/icon.png",
+      "hardenedRuntime": true,
+      "extendInfo": {
+        "NSCameraUsageDescription": "FabriC++ uses the camera for video calls.",
+        "NSMicrophoneUsageDescription": "FabriC++ uses the microphone for calls."
+      }
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Network"
+    }
+  }
+}

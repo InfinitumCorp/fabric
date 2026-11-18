@@ -130,6 +130,7 @@ PORT=8788 FABRIC_CID_ISSUER=http://localhost:8790 FABRIC_CID_CLIENT_ID=fabric-de
 | `FABRIC_CID_CLIENT_ID`, `FABRIC_CID_CLIENT_SECRET` | FabriC++'s client registration at CID. The secret is optional (PKCE is always used). |
 | `FABRIC_PUBLIC_URL` | The relay's public address. The redirect address registered at CID is `<FABRIC_PUBLIC_URL>/cid-callback.html`. |
 | `FABRIC_CID_REQUIRED=1` | New addresses need a CID. |
+| `FABRIC_CID_MIRRORS` | Comma-separated mirror origins for the same CID realm, tried when the main host is unreachable and offered in the app as "Page not loading?". Unset = the built-in list (`https://ru.id.cumuluscloud.app` for `id.cumuluscloud.app`); `none` = no mirrors. |
 
 How the sign-in works:
 

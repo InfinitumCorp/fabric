@@ -3068,13 +3068,13 @@ let cloudWho = null;
  * `note` is where to say what's happening; when pop-ups are blocked, it gets a link that opens
  * the sign-in in a new tab instead (the code still comes back over the BroadcastChannel).
  */
-async function cidSignIn(purpose, note) {
+async function cidSignIn(purpose, note, { create = false } = {}) {
   if (!cidChannel) throw new Error('This browser cannot do Cumulus://ID sign-in.');
   if (!hello) throw new Error('Relay not reachable yet — try again in a moment.');
   // opened right away, inside the tap, so pop-up blockers allow it
   const win = window.open('', 'fabric-cid', 'popup,width=480,height=700');
   let started;
-  try { started = await request({ type: 'cid_begin', purpose }); } catch (e) { win?.close(); throw e; }
+  try { started = await request({ type: 'cid_begin', purpose, ...(create ? { create: true } : {}) }); } catch (e) { win?.close(); throw e; }
   if (win) {
     win.location.href = started.url;
     note.className = 'muted small';
@@ -3103,16 +3103,20 @@ function renderCidOnboard() {
   $('cid-required').classList.toggle('hidden', !cidCfg.required);
   $('cid-register-who').textContent = cidPending ? `Signed in as ${who(cidPending)}. Now pick your address.` : '';
   $('cid-register').classList.toggle('hidden', Boolean(cidPending));
+  $('cid-create').classList.toggle('hidden', Boolean(cidPending));
 }
 
-$('cid-register').onclick = async () => {
+// Sign in, or create a Cumulus://ID first: either way the person comes back signed in.
+async function cidRegister(opts) {
   $('onboard-error').textContent = '';
   try {
-    const r = await cidSignIn('register', $('cid-register-who'));
+    const r = await cidSignIn('register', $('cid-register-who'), opts);
     cidPending = { email: r.email, name: r.name };
   } catch (err) { $('onboard-error').textContent = err.message; }
   renderCidOnboard();
-};
+}
+$('cid-register').onclick = () => cidRegister();
+$('cid-create').onclick = () => cidRegister({ create: true });
 
 $('cid-restore').onclick = async () => {
   const note = $('cid-restore-note');

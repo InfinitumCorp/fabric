@@ -673,7 +673,9 @@ export async function createRelay({
           if (!['link', 'restore', 'register'].includes(purpose)) return fail('bad purpose');
           if (purpose === 'link' && !me) return fail('register first');
           try {
-            const { state, url } = await cidSvc.begin(ws, purpose);
+            // a new person can create their Cumulus://ID in the same flow (only when registering)
+            const create = msg.create === true && purpose === 'register';
+            const { state, url } = await cidSvc.begin(ws, purpose, { create });
             return send(ws, { type: 'cid_started', ref: msg.ref, state, url });
           } catch (e) {
             log(`[relay] CID unavailable: ${e.message}`);

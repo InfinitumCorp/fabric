@@ -265,6 +265,7 @@ canvas.qr { display: block; width: 232px; height: 232px; margin: 10px 0; image-r
 .cid-step p { margin: 0; }
 .cid-button { width: 100%; background: var(--panel); color: var(--text); border: 1px solid var(--text); padding: 12px 14px; font: inherit; cursor: pointer; letter-spacing: .02em; }
 .cid-button:hover { background: var(--ink); color: var(--on-ink); }
+.cid-button.cid-create { margin-top: 8px; border-color: var(--line); }
 #backup-reuse { min-width: 300px; flex: 1; }
 
 

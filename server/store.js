@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS spks (addr TEXT PRIMARY KEY, spk TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS opks (addr TEXT NOT NULL, id INTEGER NOT NULL, pub TEXT NOT NULL, PRIMARY KEY (addr, id));
 CREATE TABLE IF NOT EXISTS queue (
   seq INTEGER PRIMARY KEY AUTOINCREMENT, addr TEXT NOT NULL, id TEXT NOT NULL,
-  envelope TEXT NOT NULL, queued_at INTEGER NOT NULL, UNIQUE (addr, id));
+  envelope TEXT NOT NULL, queued_at INTEGER NOT NULL, bytes INTEGER NOT NULL DEFAULT 0, UNIQUE (addr, id));
 CREATE INDEX IF NOT EXISTS queue_addr ON queue (addr, seq);
 CREATE INDEX IF NOT EXISTS queue_age ON queue (queued_at);
 CREATE TABLE IF NOT EXISTS consent (handle TEXT PRIMARY KEY, consent TEXT NOT NULL);
@@ -51,6 +51,10 @@ export function openStore(file = null, { importJson = null } = {}) {
   const db = new DatabaseSync(file || ':memory:');
   db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;');
   db.exec(SCHEMA);
+  // databases made before the per-mailbox byte cap: add the size column and fill it in once
+  if (!db.prepare('PRAGMA table_info(queue)').all().some((c) => c.name === 'bytes')) {
+    db.exec('ALTER TABLE queue ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0; UPDATE queue SET bytes = length(CAST(envelope AS BLOB));');
+  }
   const version = db.prepare("SELECT value FROM meta WHERE key = 'schema'").get()?.value;
   if (!version) db.prepare("INSERT INTO meta (key, value) VALUES ('schema', ?)").run(String(SCHEMA_VERSION));
 
@@ -68,7 +72,9 @@ export function openStore(file = null, { importJson = null } = {}) {
     delSpk: q('DELETE FROM spks WHERE addr = ?'),
     delOpks: q('DELETE FROM opks WHERE addr = ?'),
     delQueue: q('DELETE FROM queue WHERE addr = ?'),
-    enqueue: q('INSERT OR IGNORE INTO queue (addr, id, envelope, queued_at) VALUES (?, ?, ?, ?)'),
+    enqueue: q('INSERT OR IGNORE INTO queue (addr, id, envelope, queued_at, bytes) VALUES (?, ?, ?, ?, ?)'),
+    queueBytes: q('SELECT COALESCE(SUM(bytes), 0) AS n FROM queue WHERE addr = ?'),
+    queuedId: q('SELECT 1 FROM queue WHERE addr = ? AND id = ?'),
     queueCount: q('SELECT COUNT(*) AS n FROM queue WHERE addr = ?'),
     queued: q('SELECT envelope FROM queue WHERE addr = ? ORDER BY seq LIMIT ?'),
     ack: q('DELETE FROM queue WHERE addr = ? AND id = ?'),
@@ -172,15 +178,23 @@ export function openStore(file = null, { importJson = null } = {}) {
     },
 
     // ----- store-until-acknowledged delivery -----
-    /** Returns 'queued', 'duplicate' or 'full'. */
-    enqueue(addr, envelope, max, now = Date.now()) {
+    /**
+     * Returns 'queued', 'duplicate' or 'full'. `max` caps the envelopes waiting for one device;
+     * `maxBytes` caps their total size, so one offline device cannot pin unbounded disk.
+     */
+    enqueue(addr, envelope, max, { maxBytes = Infinity, now = Date.now() } = {}) {
+      const json = JSON.stringify(envelope);
+      const bytes = Buffer.byteLength(json);
       return tx(() => {
+        if (st.queuedId.get(addr, envelope.id)) return 'duplicate';
         if (st.queueCount.get(addr).n >= max) return 'full';
-        return st.enqueue.run(addr, envelope.id, JSON.stringify(envelope), now).changes ? 'queued' : 'duplicate';
+        if (st.queueBytes.get(addr).n + bytes > maxBytes) return 'full';
+        return st.enqueue.run(addr, envelope.id, json, now, bytes).changes ? 'queued' : 'duplicate';
       });
     },
     queued: (addr, limit = 1000) => st.queued.all(addr, limit).map((r) => JSON.parse(r.envelope)),
     queueCount: (addr) => st.queueCount.get(addr).n,
+    queueBytes: (addr) => st.queueBytes.get(addr).n,
     ack: (addr, id) => st.ack.run(addr, id).changes,
     expireQueues: (before) => st.expire.run(before).changes,
 

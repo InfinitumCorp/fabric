@@ -6,6 +6,13 @@
 //   FABRIC_MODEL_SOURCE=<url>     where to fetch from (default https://huggingface.co; or a mirror
 //                                 with the same /<org>/<repo>/resolve/main/<file> layout)
 //   FABRIC_MODEL_DIR=<dir>        cache (default data/models); files put here by hand are served too
+//   FABRIC_MODEL_PINS=0           serve whatever the source sends (default: only the exact bytes
+//                                 pinned in server/model-pins.json; regenerate with tools/pin-models.mjs)
+//
+// Pinning: every file has a SHA-256 and size in model-pins.json, and is fetched from the commit
+// it was pinned at (so a newer upload at the source does not break downloads). A download is hashed as it
+// passes through; one that does not match is cut off before its last byte reaches the device and
+// is never cached. Cached files are checked again once per relay process before they are served.
 //
 // What the relay learns: which models a device downloads (so which languages someone translates
 // between), not what is translated. Models run on the device; text never comes back here.
@@ -15,7 +22,8 @@ import http from 'node:http';
 import https from 'node:https';
 import { Readable } from 'node:stream';
 import path from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { allowedModelFile } from '../shared/models.js';
 
 const PATH_RE = /^\/models\/([A-Za-z0-9_.-]{1,64}\/[A-Za-z0-9_.-]{1,96})\/resolve\/main\/([A-Za-z0-9_./-]{1,128})$/;
@@ -23,11 +31,35 @@ const MAX_FILE = 1.5e9;
 const MAX_PER_IP = 6; // downloads at once
 const STALL_MS = 60_000; // a download with no bytes either way this long is dropped
 
+const PINS_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'model-pins.json');
+
+/** model-pins.json (or the same shape) → Map of "<model>/<file>" → { sha256, size, revision } */
+export function pinMap(json) {
+  const map = new Map();
+  for (const [id, m] of Object.entries(json?.models || {})) {
+    for (const [file, pin] of Object.entries(m.files || {})) {
+      if (!/^[0-9a-f]{64}$/.test(pin.sha256) || !Number.isSafeInteger(pin.size)) throw new Error(`bad pin for ${id}/${file}`);
+      const revision = /^[0-9a-f]{40}$/.test(m.revision || '') ? m.revision : 'main';
+      map.set(`${id}/${file}`, { sha256: pin.sha256, size: pin.size, revision });
+    }
+  }
+  return map;
+}
+
 export function modelsFromEnv(env = process.env, root = '.') {
   if (env.FABRIC_MODELS === '0') return null;
   const source = (env.FABRIC_MODEL_SOURCE || 'https://huggingface.co').replace(/\/$/, '');
   if (!/^https?:\/\/[^\s/]+(\/[^\s]*)?$/.test(source)) throw new Error('FABRIC_MODEL_SOURCE must be an http(s) URL');
-  return { source, dir: env.FABRIC_MODEL_DIR || path.join(root, 'data', 'models') };
+  const pins = env.FABRIC_MODEL_PINS === '0' ? null : pinMap(JSON.parse(fs.readFileSync(PINS_FILE, 'utf8')));
+  return { source, dir: env.FABRIC_MODEL_DIR || path.join(root, 'data', 'models'), pins };
+}
+
+/** SHA-256 of a file on disk, streamed. */
+function hashFile(file) {
+  return new Promise((resolve, reject) => {
+    const h = createHash('sha256');
+    fs.createReadStream(file).on('data', (c) => h.update(c)).on('error', reject).on('end', () => resolve(h.digest('hex')));
+  });
 }
 
 const typeOf = (file) => (file.endsWith('.json') ? 'application/json' : file.endsWith('.jinja') ? 'text/plain; charset=utf-8' : 'application/octet-stream');
@@ -63,8 +95,22 @@ export function nodeFetch(url, { method = 'GET', headers = {} } = {}, hops = 0) 
 
 const cancelBody = (body) => { try { if (body?.cancel) body.cancel().catch(() => {}); else body?.destroy?.(); } catch { /* gone */ } };
 
-export function createModelProxy({ source, dir, fetchImpl = nodeFetch, log = () => {} }) {
+export function createModelProxy({ source, dir, pins = null, fetchImpl = nodeFetch, log = () => {} }) {
   const busy = new Map(); // ip → downloads running
+  const verified = new Map(); // cached file → "size:mtime" it was checked at
+  const stamp = (st) => `${st.size}:${st.mtimeMs}`;
+
+  /** Is the cached file the pinned one? Checked once per file per process; a bad one is removed. */
+  async function cacheOk(local, pin, label) {
+    if (!pin) return true;
+    const st = fs.statSync(local);
+    if (verified.get(local) === stamp(st)) return true;
+    if (st.size === pin.size && (await hashFile(local)) === pin.sha256) { verified.set(local, stamp(st)); return true; }
+    log(`[models] ${label}: cached file does not match its pin; removed`);
+    verified.delete(local);
+    fs.rmSync(local, { force: true });
+    return false;
+  }
 
   /** The source, retried on a dropped connection (before any byte has gone to the browser). */
   async function fetchUpstream(url, method, range = null) {
@@ -88,12 +134,14 @@ export function createModelProxy({ source, dir, fetchImpl = nodeFetch, log = () 
     const m = PATH_RE.exec(url.pathname);
     if (!m || m[2].includes('..') || !allowedModelFile(m[1], m[2])) { res.writeHead(404); res.end('not found'); return true; }
     const [, id, file] = m;
+    const pin = pins ? pins.get(`${id}/${file}`) : null;
+    if (pins && !pin) { res.writeHead(404); res.end('not found'); return true; } // not at the source when pinned
     const local = path.join(dir, id, file);
     const headers = (size) => ({ 'content-type': typeOf(file), 'cache-control': 'public, max-age=604800, immutable', 'accept-ranges': 'bytes', ...(size != null ? { 'content-length': size } : {}) });
     // Transformers.js asks for "bytes=0-0" first to learn a file's size
     const range = /^bytes=(\d{1,12})-(\d{0,12})$/.exec(String(req.headers.range || ''));
 
-    if (fs.existsSync(local)) {
+    if (fs.existsSync(local) && await cacheOk(local, pin, `${id}/${file}`)) {
       const { size } = fs.statSync(local);
       if (range) {
         const start = Number(range[1]);
@@ -114,7 +162,7 @@ export function createModelProxy({ source, dir, fetchImpl = nodeFetch, log = () 
       const want = Number(range[2] || 0) - Number(range[1]);
       if (!range[2] || want < 0 || want > 1 << 20) { res.writeHead(416); res.end(); return true; }
       try {
-        const up = await fetchUpstream(`${source}/${id}/resolve/main/${file}`, 'GET', req.headers.range);
+        const up = await fetchUpstream(`${source}/${id}/resolve/${pin?.revision || 'main'}/${file}`, 'GET', req.headers.range);
         if (up.status !== 206) {
           cancelBody(up.body); // a source that ignores ranges: don't read the whole file for one byte
           res.writeHead(up.status === 404 ? 404 : up.ok ? 416 : 502); res.end(); return true;
@@ -132,16 +180,23 @@ export function createModelProxy({ source, dir, fetchImpl = nodeFetch, log = () 
     busy.set(ip, (busy.get(ip) || 0) + 1);
     const tmp = `${local}.${randomBytes(6).toString('hex')}.part`;
     try {
-      const up = await fetchUpstream(`${source}/${id}/resolve/main/${file}`, req.method === 'HEAD' ? 'HEAD' : 'GET');
+      const up = await fetchUpstream(`${source}/${id}/resolve/${pin?.revision || 'main'}/${file}`, req.method === 'HEAD' ? 'HEAD' : 'GET');
       if (!up.ok) { res.writeHead(up.status === 404 ? 404 : 502); res.end(up.status === 404 ? 'not found' : 'model source unavailable'); return true; }
       const encoded = (up.headers.get('content-encoding') || 'identity') !== 'identity';
       const size = encoded ? null : Number(up.headers.get('content-length')) || null;
       if (size && size > MAX_FILE) { res.writeHead(502); res.end('model file too large'); return true; }
-      res.writeHead(200, headers(size));
+      if (pin && (encoded || (size && size !== pin.size))) {
+        cancelBody(up.body);
+        log(`[models] ${id}/${file}: the source sent ${encoded ? 'an encoded body' : `${size} bytes`}, pinned ${pin.size}`);
+        res.writeHead(502); res.end('model file does not match its pin'); return true;
+      }
+      // with a pin the length is known, so a device sees a cut-off download as failed, not complete
+      res.writeHead(200, headers(pin ? pin.size : size));
       if (req.method === 'HEAD' || !up.body) { res.end(); return true; }
       // to the browser and into the cache at once; the cache file appears only when complete
       fs.mkdirSync(path.dirname(local), { recursive: true });
       const out = fs.createWriteStream(tmp);
+      const hash = createHash('sha256');
       let got = 0;
       let gone = false;
       res.on('close', () => { if (!res.writableFinished) gone = true; });
@@ -162,8 +217,13 @@ export function createModelProxy({ source, dir, fetchImpl = nodeFetch, log = () 
           arm();
           if (gone) throw new Error('client went away');
           got += chunk.length;
-          if (got > MAX_FILE) throw new Error('model file too large');
+          if (got > MAX_FILE || (pin && got > pin.size)) throw new Error('model file too large');
+          hash.update(chunk);
           out.write(chunk);
+          // the last bytes wait for the hash check, so a device never gets a whole file that is wrong
+          if (pin && got === pin.size) {
+            if (hash.digest('hex') !== pin.sha256) throw new Error('does not match its pinned SHA-256; not cached');
+          }
           res.write(chunk);
           // check each after the other: one may drain while we wait for the other
           if (out.writableNeedDrain) await drained(out);
@@ -176,9 +236,13 @@ export function createModelProxy({ source, dir, fetchImpl = nodeFetch, log = () 
       } finally {
         clearTimeout(stall);
       }
+      if (pin && got !== pin.size) throw new Error(`ended at ${got} bytes, pinned ${pin.size}; not cached`);
       res.end();
       await new Promise((r) => out.end(r));
-      if (!size || got === size) fs.renameSync(tmp, local);
+      if (!size || got === size) {
+        fs.renameSync(tmp, local);
+        if (pin) verified.set(local, stamp(fs.statSync(local)));
+      }
       log(`[models] cached ${id}/${file} (${(got / 1e6).toFixed(1)} MB)`);
     } catch (e) {
       log(`[models] ${id}/${file}: ${e.message || e}${e.cause ? ` (${e.cause.code || e.cause.message})` : ""}`);

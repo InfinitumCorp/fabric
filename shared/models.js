@@ -53,6 +53,15 @@ export function modelKind(id) {
   return [...PAIRS.values()].includes(id) ? 'translation' : null;
 }
 
+/** Every model the relay may pass through. */
+export const MODEL_IDS = [...new Set([...PAIRS.values()]), ASSISTANT_MODEL].sort();
+
+/** The files of one model the relay may pass through (not all exist at the source). */
+export function modelFiles(id) {
+  const kind = modelKind(id);
+  return kind ? [...COMMON_FILES, ...FILES_BY_KIND[kind]].sort() : [];
+}
+
 /** May the relay pass this model file through? (Only listed models, only the files they need.) */
 export function allowedModelFile(id, file) {
   const kind = modelKind(id);

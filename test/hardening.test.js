@@ -81,6 +81,35 @@ async function signIn(port, a, { prekeys = true, store = a.store ??= emptyStore(
 
 const pub = (a) => ({ dh: a.dev.keys.dh.publicJwk, sig: a.dev.keys.sig.publicJwk });
 
+test('store: caps the bytes waiting for one device, and migrates older databases', async () => {
+  const file = path.join(tmp(), 'fabric.db');
+  let s = openStore(file);
+  const env = (id, n) => ({ id, ct: 'x'.repeat(n) });
+  const one = Buffer.byteLength(JSON.stringify(env('a1', 1000)));
+  assert.equal(s.enqueue('@b.veil#1', env('a1', 1000), 100, { maxBytes: one * 2 }), 'queued');
+  assert.equal(s.enqueue('@b.veil#1', env('a2', 1000), 100, { maxBytes: one * 2 }), 'queued');
+  assert.equal(s.queueBytes('@b.veil#1'), one * 2);
+  assert.equal(s.enqueue('@b.veil#1', env('a3', 1000), 100, { maxBytes: one * 2 }), 'full', 'over the byte cap');
+  assert.equal(s.enqueue('@b.veil#1', env('a1', 1000), 100, { maxBytes: one * 2 }), 'duplicate', 'a resend still gets its ack when full');
+  assert.equal(s.enqueue('@c.veil#1', env('a3', 1000), 100, { maxBytes: one * 2 }), 'queued', 'the cap is per device');
+  s.ack('@b.veil#1', 'a1');
+  assert.equal(s.enqueue('@b.veil#1', env('a3', 1000), 100, { maxBytes: one * 2 }), 'queued', 'room again after an ack');
+  s.close();
+
+  // a database from before the size column: the column is added and filled in on open
+  const { DatabaseSync } = await import('node:sqlite');
+  const old = path.join(tmp(), 'old.db');
+  const db = new DatabaseSync(old);
+  db.exec(`CREATE TABLE queue (seq INTEGER PRIMARY KEY AUTOINCREMENT, addr TEXT NOT NULL, id TEXT NOT NULL,
+    envelope TEXT NOT NULL, queued_at INTEGER NOT NULL, UNIQUE (addr, id));`);
+  db.prepare('INSERT INTO queue (addr, id, envelope, queued_at) VALUES (?, ?, ?, ?)').run('@b.veil#1', 'o1', JSON.stringify(env('o1', 500)), 1);
+  db.close();
+  s = openStore(old);
+  assert.equal(s.queueBytes('@b.veil#1'), Buffer.byteLength(JSON.stringify(env('o1', 500))));
+  assert.deepEqual(s.queued('@b.veil#1').map((e) => e.id), ['o1']);
+  s.close();
+});
+
 test('store: committed to disk, survives reopen, dedupes and caps queues', () => {
   const file = path.join(tmp(), 'fabric.db');
   let s = openStore(file);

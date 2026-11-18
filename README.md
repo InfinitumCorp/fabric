@@ -528,6 +528,7 @@ existing `data/state-v3.json` is imported once and renamed to `.imported`.
 | `FABRIC_TLS_CERT`, `FABRIC_TLS_KEY` | PEM files. Serves HTTPS/WSS and sends HSTS. |
 | `FABRIC_ORIGINS` | Comma-separated origins allowed to open a WebSocket. Default: the relay's own host. |
 | `FABRIC_TRUST_PROXY=1` | Take the client IP from `X-Forwarded-For` (only behind your own proxy). |
+| `FABRIC_QUEUE_MAX_MB` | Most megabytes of undelivered envelopes kept for one device (default 100; also at most 1,000 envelopes). Past that, senders get `recipient queue full` until the device comes online and acknowledges. |
 | `FABRIC_ICE_SERVERS` | STUN/TURN list for calls (see above). |
 | `FABRIC_SFU`, `FABRIC_SFU_PUBLIC_IP`, `FABRIC_SFU_PORTS` | Large-call media server (see Large calls). |
 | `FABRIC_SFU_NODES`, `FABRIC_SFU_NODE_SECRET`, `FABRIC_SFU_NODE_CAP` | Separate SFU media nodes (see Several SFU nodes per room). |

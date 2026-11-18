@@ -52,6 +52,8 @@ import { MAX_UPLOAD_BYTES, TIERS } from '../shared/tiers.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MAX_ENVELOPE_BYTES = 512 * 1024; // link payloads carry a history snapshot
 const MAX_QUEUE = 1000;
+// total size of the envelopes waiting for one device (FABRIC_QUEUE_MAX_MB); 1000 full envelopes would be ~500 MB
+const MAX_QUEUE_BYTES = 100 * 1024 * 1024;
 const MAX_OPKS = 200;
 const MAILBOX_TTL_MS = 10 * 60 * 1000;
 const QUEUE_TTL_MS = 30 * 24 * 3600 * 1000;
@@ -115,6 +117,11 @@ function sameSecret(given, expected) {
   return timingSafeEqual(a, b);
 }
 
+function queueBytesFromEnv(env = process.env) {
+  const mb = Number(env.FABRIC_QUEUE_MAX_MB);
+  return Number.isFinite(mb) && mb > 0 ? Math.floor(mb * 1024 * 1024) : MAX_QUEUE_BYTES;
+}
+
 export async function createRelay({
   port = 8787,
   dataFile = process.env.FABRIC_DB || path.join(ROOT, 'data', 'fabric.db'),
@@ -126,6 +133,7 @@ export async function createRelay({
   origins = listEnv(process.env.FABRIC_ORIGINS),
   trustProxy = process.env.FABRIC_TRUST_PROXY === '1',
   limits = defaultLimits(),
+  queueBytes = queueBytesFromEnv(),
   heartbeatMs = HEARTBEAT_MS,
   phone = phoneFromEnv(),
   links = linksFromEnv(),
@@ -649,7 +657,7 @@ export async function createRelay({
       if (limited(limits.sealedTarget, addr, 1, { ref: msg.ref })) return;
       // no sender fields; the relay's own clock instead of the sender's
       const envelope = { id, ts: Date.now(), sealed: { v: 1, ek: publicOnly(sealed.ek), iv: sealed.iv, ct: sealed.ct } };
-      const outcome = store.enqueue(addr, envelope, MAX_QUEUE);
+      const outcome = store.enqueue(addr, envelope, MAX_QUEUE, { maxBytes: queueBytes });
       if (outcome === 'full') return fail('recipient queue full');
       const target = online.get(addr);
       if (outcome === 'queued' && target) send(target, { type: 'deliver', envelope });
@@ -803,7 +811,7 @@ export async function createRelay({
           };
           const addr = deviceAddr(e.to, e.toDevice);
           // stored (and committed) before anything is acknowledged; removed when the device acks it
-          const outcome = store.enqueue(addr, envelope, MAX_QUEUE);
+          const outcome = store.enqueue(addr, envelope, MAX_QUEUE, { maxBytes: queueBytes });
           if (outcome === 'full') return send(ws, { type: 'error', error: 'recipient queue full', ...ref });
           const target = online.get(addr);
           if (outcome === 'queued') {

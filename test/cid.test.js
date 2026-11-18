@@ -4,7 +4,7 @@ import { generateKeyPairSync, sign as signData } from 'node:crypto';
 import WebSocket from 'ws';
 import { createRelay } from '../server/relay.js';
 import { createDevIssuer } from '../server/cid-dev.js';
-import { verifyIdToken } from '../server/cid.js';
+import { verifyIdToken, createCid, cidFromEnv } from '../server/cid.js';
 import { generateUserIdentity, generateSigningKey, ownershipProof } from '../shared/crypto.js';
 import { signDeviceList, newDeviceId } from '../shared/devices.js';
 
@@ -218,6 +218,65 @@ test('Create a Cumulus://ID: register can open the sign-up page; other purposes 
     assert.equal(restore.searchParams.get('prompt'), 'select_account', 'restore needs an existing Cumulus://ID');
     c.close();
   } finally { await env.close(); }
+});
+
+// A stand-in for Cumulus://ID behind a throttled main host: discovery on the mirror names the main
+// host's endpoints (as the real mirror does), and `down` lists hosts that never answer.
+function fakeCid({ down = [] } = {}) {
+  const ISS = 'https://id.cumuluscloud.app/realms/cumulus';
+  const calls = [];
+  const fetchImpl = async (url) => {
+    const u = new URL(url);
+    calls.push(u.origin + u.pathname);
+    if (down.includes(u.origin)) throw new TypeError('fetch failed');
+    if (u.pathname.endsWith('/.well-known/openid-configuration')) {
+      return new Response(JSON.stringify({
+        issuer: ISS, authorization_endpoint: `${ISS}/protocol/openid-connect/auth`,
+        token_endpoint: `${ISS}/protocol/openid-connect/token`, jwks_uri: `${ISS}/protocol/openid-connect/certs`,
+        code_challenge_methods_supported: ['S256'],
+      }));
+    }
+    return new Response('{}', { status: 404 });
+  };
+  return { ISS, calls, fetchImpl };
+}
+
+test('Cumulus://ID mirror: the page gets the Russia mirror too, on the mirror host', async () => {
+  const f = fakeCid();
+  const cid = createCid({ issuer: f.ISS, clientId: 'fabric', redirectUri: 'https://relay.example/cid-callback.html', secret: 's', fetchImpl: f.fetchImpl });
+  const { url, mirrors } = await cid.begin({}, 'register');
+  assert.equal(new URL(url).origin, 'https://id.cumuluscloud.app');
+  assert.equal(mirrors.length, 1);
+  const m = new URL(mirrors[0]);
+  assert.equal(m.origin, 'https://ru.id.cumuluscloud.app');
+  assert.equal(m.pathname, '/realms/cumulus/protocol/openid-connect/auth');
+  assert.equal(m.searchParams.get('state'), new URL(url).searchParams.get('state'), 'one sign-in, two hosts');
+  assert.equal((await cid.discover()).via, 'https://id.cumuluscloud.app');
+});
+
+test('Cumulus://ID mirror: when the main host never answers, the relay talks to the mirror', async () => {
+  const f = fakeCid({ down: ['https://id.cumuluscloud.app'] });
+  const cid = createCid({ issuer: f.ISS, clientId: 'fabric', redirectUri: 'https://relay.example/cid-callback.html', secret: 's', fetchImpl: f.fetchImpl });
+  const c = await cid.discover();
+  assert.equal(c.via, 'https://ru.id.cumuluscloud.app');
+  assert.equal(c.issuer, f.ISS, 'tokens are still checked against the main issuer');
+  assert.equal(new URL(c.token_endpoint).origin, 'https://ru.id.cumuluscloud.app');
+  assert.equal(new URL(c.jwks_uri).origin, 'https://ru.id.cumuluscloud.app');
+  assert.deepEqual(f.calls.slice(0, 2), [
+    'https://id.cumuluscloud.app/realms/cumulus/.well-known/openid-configuration',
+    'https://ru.id.cumuluscloud.app/realms/cumulus/.well-known/openid-configuration',
+  ]);
+});
+
+test('Cumulus://ID mirror: FABRIC_CID_MIRRORS sets or turns off the mirrors; other issuers get none', async () => {
+  assert.deepEqual(cidFromEnv({ FABRIC_CID_ISSUER: 'https://x', FABRIC_CID_CLIENT_ID: 'c', FABRIC_CID_MIRRORS: 'none' }).mirrors, []);
+  assert.deepEqual(cidFromEnv({ FABRIC_CID_ISSUER: 'https://x', FABRIC_CID_CLIENT_ID: 'c', FABRIC_CID_MIRRORS: 'https://a, https://b' }).mirrors, ['https://a', 'https://b']);
+  assert.equal(cidFromEnv({ FABRIC_CID_ISSUER: 'https://x', FABRIC_CID_CLIENT_ID: 'c' }).mirrors, undefined);
+  const f = fakeCid();
+  const off = createCid({ issuer: f.ISS, clientId: 'fabric', redirectUri: 'https://relay.example/cb', secret: 's', mirrors: [], fetchImpl: f.fetchImpl });
+  assert.deepEqual((await off.begin({}, 'register')).mirrors, []);
+  // a mirror must be https, like the issuer
+  assert.throws(() => createCid({ issuer: f.ISS, clientId: 'fabric', redirectUri: 'https://relay.example/cb', secret: 's', mirrors: ['http://ru.example'], fetchImpl: f.fetchImpl }), /must use https/);
 });
 
 test('ID tokens: signature, algorithm, issuer, audience, time and nonce are all checked', async () => {

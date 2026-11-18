@@ -14,6 +14,12 @@ const SKEW_S = 60;
 const FLOW_TTL_MS = 10 * 60 * 1000;
 const ALGS = { ES256: { hash: 'sha256', dsaEncoding: 'ieee-p1363', kty: 'EC' }, RS256: { hash: 'sha256', kty: 'RSA' } };
 
+// Hosts that serve the same Cumulus://ID realm where the main host is throttled. Cloudflare (in
+// front of id.cumuluscloud.app) stalls on many Russian networks; the mirror is reachable there
+// without a VPN. Its discovery document still names the main host's endpoints, so the relay
+// moves each endpoint onto the mirror's host itself. ID tokens keep the main issuer either way.
+export const KNOWN_MIRRORS = { 'id.cumuluscloud.app': ['https://ru.id.cumuluscloud.app'] };
+
 const isLocalUrl = (u) => ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname) || u.hostname.endsWith('.localhost');
 
 /** https, or plain http on this machine only (the development stand-in). */
@@ -34,6 +40,9 @@ export function cidFromEnv(env = process.env) {
     clientSecret: env.FABRIC_CID_CLIENT_SECRET || null,
     publicUrl: env.FABRIC_PUBLIC_URL || null,
     required: env.FABRIC_CID_REQUIRED === '1',
+    // comma-separated; unset = the known mirror for the issuer's host, "none" = no mirror
+    mirrors: env.FABRIC_CID_MIRRORS === undefined ? undefined
+      : env.FABRIC_CID_MIRRORS === 'none' ? [] : env.FABRIC_CID_MIRRORS.split(',').map((m) => m.trim()).filter(Boolean),
   };
 }
 
@@ -80,15 +89,33 @@ export async function verifyIdToken(jwt, { issuer, clientId, nonce, keys, now = 
  * The relay's CID client. `secret` keys the stored account ids: the relay keeps
  * HMAC(secret, issuer|sub), never CID's own id for the person.
  */
-export function createCid({ issuer, clientId, clientSecret = null, redirectUri, secret, fetchImpl = globalThis.fetch, now = () => Date.now() }) {
-  checkUrl(issuer, 'FABRIC_CID_ISSUER');
+export function createCid({ issuer, clientId, clientSecret = null, redirectUri, secret, mirrors, fetchImpl = globalThis.fetch, now = () => Date.now() }) {
+  const issuerUrl = checkUrl(issuer, 'FABRIC_CID_ISSUER');
+  const mirrorOrigins = (mirrors ?? KNOWN_MIRRORS[issuerUrl.hostname] ?? [])
+    .map((m) => checkUrl(m, 'FABRIC_CID_MIRRORS').origin)
+    .filter((o) => o !== issuerUrl.origin);
+  // An endpoint on the issuer's host, moved onto `origin` (main or a mirror). Other hosts stay put.
+  const onHost = (endpoint, origin) => {
+    const u = new URL(endpoint);
+    if (u.origin !== issuerUrl.origin) return endpoint;
+    const o = new URL(origin);
+    u.protocol = o.protocol; u.host = o.host;
+    return u.toString();
+  };
+  // A request that never got an answer (timeout, reset): worth trying again on another host.
+  const unreachable = (e) => e?.unreachable === true;
   checkUrl(redirectUri, 'the CID redirect address');
   let config = null;
   let jwks = { at: 0, keys: [] };
   const flows = new Map(); // state -> { owner, purpose, nonce, verifier, expires }
 
   async function getJson(url, init) {
-    const r = await fetchImpl(url, { ...init, signal: AbortSignal.timeout(10_000) });
+    let r;
+    try {
+      r = await fetchImpl(url, { ...init, signal: AbortSignal.timeout(10_000) });
+    } catch (e) {
+      throw Object.assign(new Error(`CID unreachable: ${e?.message || e}`), { unreachable: true });
+    }
     const text = await r.text();
     let body;
     try { body = JSON.parse(text); } catch { throw new Error(`CID answered ${r.status} without JSON`); }
@@ -96,13 +123,39 @@ export function createCid({ issuer, clientId, clientSecret = null, redirectUri, 
     return body;
   }
 
+  /** Discovery from the main host, or from the first mirror that answers when it does not. */
   async function discover() {
     if (config) return config;
-    const c = await getJson(`${issuer.replace(/\/$/, '')}/.well-known/openid-configuration`);
-    if (c.issuer !== issuer) throw new Error('CID discovery names another issuer');
-    for (const k of ['authorization_endpoint', 'token_endpoint', 'jwks_uri']) checkUrl(c[k], `CID ${k}`);
-    if (Array.isArray(c.code_challenge_methods_supported) && !c.code_challenge_methods_supported.includes('S256')) throw new Error('CID does not support PKCE S256');
-    return (config = c);
+    const path = `${issuerUrl.pathname.replace(/\/$/, '')}/.well-known/openid-configuration`;
+    let lastError;
+    for (const origin of [issuerUrl.origin, ...mirrorOrigins]) {
+      let c;
+      try { c = await getJson(origin + path); } catch (e) {
+        if (!unreachable(e)) throw e;
+        lastError = e;
+        continue;
+      }
+      if (c.issuer !== issuer) throw new Error('CID discovery names another issuer');
+      for (const k of ['authorization_endpoint', 'token_endpoint', 'jwks_uri']) checkUrl(c[k], `CID ${k}`);
+      if (Array.isArray(c.code_challenge_methods_supported) && !c.code_challenge_methods_supported.includes('S256')) throw new Error('CID does not support PKCE S256');
+      // `via` is the host the relay talks to; endpoints on the issuer's host move there
+      return (config = { ...c, via: origin, token_endpoint: onHost(c.token_endpoint, origin), jwks_uri: onHost(c.jwks_uri, origin) });
+    }
+    throw lastError;
+  }
+
+  /** The same request on the host discovery picked, then on the other hosts while it gets no answer. */
+  async function getJsonAnyHost(endpoint, init) {
+    const c = await discover();
+    const hosts = [c.via, ...[issuerUrl.origin, ...mirrorOrigins].filter((o) => o !== c.via)];
+    let lastError;
+    for (const origin of hosts) {
+      try { return await getJson(onHost(endpoint, origin), init); } catch (e) {
+        if (!unreachable(e)) throw e;
+        lastError = e;
+      }
+    }
+    throw lastError;
   }
 
   /** A signing key by id; the key set is refetched at most once a minute for an unknown id. */
@@ -111,24 +164,30 @@ export function createCid({ issuer, clientId, clientSecret = null, redirectUri, 
     if (find()) return find();
     if (now() - jwks.at < 60_000) return null;
     const { jwks_uri: uri } = await discover();
-    const set = await getJson(uri);
+    const set = await getJsonAnyHost(uri);
     jwks = { at: now(), keys: Array.isArray(set.keys) ? set.keys : [] };
     return find() || null;
   }
 
-  /** Start a sign-in for `owner` (the socket that asked). Returns the URL for the sign-in window. */
-  async function begin(owner, purpose) {
+  /**
+   * Start a sign-in for `owner` (the socket that asked). Returns the URL for the sign-in window.
+   * `create` opens Cumulus://ID on its sign-up page; after sign-up it comes back here signed in.
+   */
+  async function begin(owner, purpose, { create = false } = {}) {
     const c = await discover();
     const state = b64url(randomBytes(24));
     const nonce = b64url(randomBytes(24));
     const { verifier, challenge } = pkce();
     flows.set(state, { owner, purpose, nonce, verifier, expires: now() + FLOW_TTL_MS });
-    const u = new URL(c.authorization_endpoint);
-    u.search = new URLSearchParams({
+    const search = new URLSearchParams({
       response_type: 'code', client_id: clientId, redirect_uri: redirectUri, scope: 'openid email profile',
-      state, nonce, code_challenge: challenge, code_challenge_method: 'S256', prompt: 'select_account',
+      state, nonce, code_challenge: challenge, code_challenge_method: 'S256', prompt: create ? 'create' : 'select_account',
     }).toString();
-    return { state, url: u.toString() };
+    const at = (origin) => { const u = new URL(onHost(c.authorization_endpoint, origin)); u.search = search; return u.toString(); };
+    // `url` is the sign-in page on the main host; `mirrors` is the same page on hosts that work
+    // where the main host is throttled (the page opens a mirror first in Russia and Belarus)
+    const url = at(issuerUrl.origin);
+    return { state, url, mirrors: mirrorOrigins.map(at).filter((u) => u !== url) };
   }
 
   /**
@@ -145,7 +204,7 @@ export function createCid({ issuer, clientId, clientSecret = null, redirectUri, 
     const headers = { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' };
     const form = { grant_type: 'authorization_code', code, redirect_uri: redirectUri, code_verifier: flow.verifier, client_id: clientId };
     if (clientSecret) headers.authorization = `Basic ${Buffer.from(`${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`).toString('base64')}`;
-    const tok = await getJson(c.token_endpoint, { method: 'POST', headers, body: new URLSearchParams(form).toString() });
+    const tok = await getJsonAnyHost(c.token_endpoint, { method: 'POST', headers, body: new URLSearchParams(form).toString() });
     if (typeof tok.id_token !== 'string') throw new Error('CID sent no ID token');
     const claims = await verifyIdToken(tok.id_token, { issuer, clientId, nonce: flow.nonce, keys: keyFor, now: now() });
     return {

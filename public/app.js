@@ -3068,20 +3068,41 @@ let cloudWho = null;
  * `note` is where to say what's happening; when pop-ups are blocked, it gets a link that opens
  * the sign-in in a new tab instead (the code still comes back over the BroadcastChannel).
  */
-async function cidSignIn(purpose, note) {
+// Russian and Belarusian networks throttle Cloudflare, which fronts the main Cumulus://ID host.
+// There the sign-in window opens the mirror first (the same account, reachable without a VPN).
+const THROTTLED_ZONES = /^(Europe\/(Moscow|Kaliningrad|Samara|Volgograd|Saratov|Ulyanovsk|Astrakhan|Kirov|Minsk|Simferopol)|Asia\/(Yekaterinburg|Omsk|Novosibirsk|Barnaul|Tomsk|Novokuznetsk|Krasnoyarsk|Irkutsk|Chita|Yakutsk|Khandyga|Vladivostok|Ust-Nera|Magadan|Sakhalin|Srednekolymsk|Kamchatka|Anadyr))$/;
+function cidMirrorFirst() {
+  let zone = '';
+  try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { /* no Intl */ }
+  const langs = navigator.languages?.length ? navigator.languages : [navigator.language || ''];
+  return THROTTLED_ZONES.test(zone) || langs.some((l) => /^(ru|be)\b/i.test(l));
+}
+
+async function cidSignIn(purpose, note, { create = false } = {}) {
   if (!cidChannel) throw new Error('This browser cannot do Cumulus://ID sign-in.');
   if (!hello) throw new Error('Relay not reachable yet — try again in a moment.');
   // opened right away, inside the tap, so pop-up blockers allow it
   const win = window.open('', 'fabric-cid', 'popup,width=480,height=700');
   let started;
-  try { started = await request({ type: 'cid_begin', purpose }); } catch (e) { win?.close(); throw e; }
+  try { started = await request({ type: 'cid_begin', purpose, ...(create ? { create: true } : {}) }); } catch (e) { win?.close(); throw e; }
+  const hosts = [started.url, ...(Array.isArray(started.mirrors) ? started.mirrors : [])];
+  if (hosts.length > 1 && cidMirrorFirst()) hosts.push(hosts.shift());
+  const [first, other] = hosts;
   if (win) {
-    win.location.href = started.url;
+    win.location.href = first;
     note.className = 'muted small';
     note.textContent = 'Finish signing in in the Cumulus://ID window.';
+    if (other) {
+      // same sign-in on the other host, in the same window, if this one doesn't load
+      const alt = el('a', '', other === started.url ? 'Open the main sign-in page' : 'Open the Russia mirror');
+      alt.href = other;
+      alt.target = 'fabric-cid';
+      alt.rel = 'noopener';
+      note.append(document.createTextNode(' Page not loading? '), alt);
+    }
   } else {
     const a = el('a', '', 'Continue to Cumulus://ID');
-    a.href = started.url;
+    a.href = first;
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
     note.className = 'small';
@@ -3103,16 +3124,20 @@ function renderCidOnboard() {
   $('cid-required').classList.toggle('hidden', !cidCfg.required);
   $('cid-register-who').textContent = cidPending ? `Signed in as ${who(cidPending)}. Now pick your address.` : '';
   $('cid-register').classList.toggle('hidden', Boolean(cidPending));
+  $('cid-create').classList.toggle('hidden', Boolean(cidPending));
 }
 
-$('cid-register').onclick = async () => {
+// Sign in, or create a Cumulus://ID first: either way the person comes back signed in.
+async function cidRegister(opts) {
   $('onboard-error').textContent = '';
   try {
-    const r = await cidSignIn('register', $('cid-register-who'));
+    const r = await cidSignIn('register', $('cid-register-who'), opts);
     cidPending = { email: r.email, name: r.name };
   } catch (err) { $('onboard-error').textContent = err.message; }
   renderCidOnboard();
-};
+}
+$('cid-register').onclick = () => cidRegister();
+$('cid-create').onclick = () => cidRegister({ create: true });
 
 $('cid-restore').onclick = async () => {
   const note = $('cid-restore-note');

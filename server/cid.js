@@ -116,8 +116,11 @@ export function createCid({ issuer, clientId, clientSecret = null, redirectUri, 
     return find() || null;
   }
 
-  /** Start a sign-in for `owner` (the socket that asked). Returns the URL for the sign-in window. */
-  async function begin(owner, purpose) {
+  /**
+   * Start a sign-in for `owner` (the socket that asked). Returns the URL for the sign-in window.
+   * `create` opens Cumulus://ID on its sign-up page; after sign-up it comes back here signed in.
+   */
+  async function begin(owner, purpose, { create = false } = {}) {
     const c = await discover();
     const state = b64url(randomBytes(24));
     const nonce = b64url(randomBytes(24));
@@ -126,7 +129,7 @@ export function createCid({ issuer, clientId, clientSecret = null, redirectUri, 
     const u = new URL(c.authorization_endpoint);
     u.search = new URLSearchParams({
       response_type: 'code', client_id: clientId, redirect_uri: redirectUri, scope: 'openid email profile',
-      state, nonce, code_challenge: challenge, code_challenge_method: 'S256', prompt: 'select_account',
+      state, nonce, code_challenge: challenge, code_challenge_method: 'S256', prompt: create ? 'create' : 'select_account',
     }).toString();
     return { state, url: u.toString() };
   }

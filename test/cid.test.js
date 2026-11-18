@@ -205,6 +205,21 @@ test('FABRIC_CID_REQUIRED: a new address needs a CID without one; existing addre
   } finally { await env.close(); }
 });
 
+test('Create a Cumulus://ID: register can open the sign-up page; other purposes cannot', async () => {
+  const env = await setup();
+  try {
+    const c = client(env.relay.port);
+    await c.next((m) => m.type === 'hello');
+    const plain = new URL((await c.ask({ type: 'cid_begin', purpose: 'register' }, 'cid_started')).url);
+    assert.equal(plain.searchParams.get('prompt'), 'select_account');
+    const create = new URL((await c.ask({ type: 'cid_begin', purpose: 'register', create: true }, 'cid_started')).url);
+    assert.equal(create.searchParams.get('prompt'), 'create');
+    const restore = new URL((await c.ask({ type: 'cid_begin', purpose: 'restore', create: true }, 'cid_started')).url);
+    assert.equal(restore.searchParams.get('prompt'), 'select_account', 'restore needs an existing Cumulus://ID');
+    c.close();
+  } finally { await env.close(); }
+});
+
 test('ID tokens: signature, algorithm, issuer, audience, time and nonce are all checked', async () => {
   const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
   const other = generateKeyPairSync('ec', { namedCurve: 'P-256' });

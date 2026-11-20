@@ -7,7 +7,7 @@ import {
 } from '../shared/burner.js';
 import { phoneFromEnv } from '../server/phone.js';
 import { createRelay } from '../server/relay.js';
-import { CFG, signIn, webhook } from './phone-helpers.js';
+import { CFG, signIn, webhook, openPhone } from './phone-helpers.js';
 
 const envOf = (c) => ({
   TWILIO_ACCOUNT_SID: c.accountSid, TWILIO_AUTH_TOKEN: c.authToken, TWILIO_API_KEY_SID: c.apiKey,
@@ -114,7 +114,9 @@ test('relay: burner numbers lent from the pool, routed, rotated and burned', asy
   assert.match(inc.body, /<Identity>ana<\/Identity><Parameter name="from" value="\+15557654321"\/><Parameter name="via" value="\+15550003001"\/>/);
   assert.equal((await ana.next((m) => m.type === 'phone_event')).event.via, '+15550003001');
   await webhook(port, '/api/phone/sms', { To: '+15550003001', From: '+15557654321', Body: 'who is this?' });
-  assert.equal((await ana.next((m) => m.type === 'phone_event' && m.event.kind === 'sms')).event.text, 'who is this?');
+  const smsPush = await ana.next((m) => m.type === 'phone_event');
+  assert.equal(JSON.stringify(smsPush).includes('who is this?'), false);
+  assert.equal((await openPhone(smsPush.event, ana)).text, 'who is this?');
 
   // calling and texting out from it: the other side sees only the burner
   const out = await webhook(port, '/api/phone/voice', { From: 'client:ana', To: '+15557654321', Via: '+15550003001', CallSid: 'CA' + '6'.repeat(32) });
@@ -123,6 +125,7 @@ test('relay: burner numbers lent from the pool, routed, rotated and burned', asy
   assert.match((await webhook(port, '/api/phone/voice', { From: 'client:ana', To: '+15557654321' })).body, /no phone number/, 'no main number: no fallback');
   const sms = await ana.ask({ type: 'sms_send', to: '+15557654321', text: 'a friend', via: '+15550003001' }, 'sms_sent');
   assert.equal(sms.event.via, '+15550003001');
+  assert.equal((await openPhone(sms.event, ana)).text, 'a friend');
   assert.equal(new URLSearchParams(sent.at(-1).init.body).get('From'), '+15550003001');
   await assert.rejects(ben.ask({ type: 'sms_send', to: '+15557654321', text: 'x', via: '+15550003001' }, 'sms_sent'), /no longer yours/);
   assert.equal((await ana.ask({ type: 'phone_log' }, 'phone_log')).events.length, 4);

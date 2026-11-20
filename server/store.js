@@ -31,9 +31,10 @@ CREATE INDEX IF NOT EXISTS ledger_handle ON ledger (handle, kind, seq);
 CREATE TABLE IF NOT EXISTS payouts (handle TEXT NOT NULL, seq INTEGER NOT NULL, cents INTEGER NOT NULL, fab REAL NOT NULL, PRIMARY KEY (handle, seq));
 CREATE TABLE IF NOT EXISTS delivery_keys (handle TEXT PRIMARY KEY, key TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS phone_numbers (number TEXT PRIMARY KEY, handle TEXT NOT NULL UNIQUE);
-CREATE TABLE IF NOT EXISTS phone_log (seq INTEGER PRIMARY KEY, handle TEXT NOT NULL, at INTEGER NOT NULL, event TEXT NOT NULL, call_sid TEXT);
+CREATE TABLE IF NOT EXISTS phone_log (seq INTEGER PRIMARY KEY, handle TEXT NOT NULL, at INTEGER NOT NULL, event TEXT NOT NULL, call_sid TEXT, via TEXT);
 CREATE INDEX IF NOT EXISTS phone_log_handle ON phone_log (handle, seq);
 CREATE INDEX IF NOT EXISTS phone_log_call ON phone_log (call_sid);
+CREATE TABLE IF NOT EXISTS phone_audio (seq INTEGER PRIMARY KEY, handle TEXT NOT NULL, box TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS burner_pool (number TEXT PRIMARY KEY, free_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS burner_lines (number TEXT PRIMARY KEY, handle TEXT NOT NULL, created_at INTEGER NOT NULL, rotated_from TEXT);
 CREATE INDEX IF NOT EXISTS burner_lines_handle ON burner_lines (handle);
@@ -54,6 +55,11 @@ export function openStore(file = null, { importJson = null } = {}) {
   // databases made before the per-mailbox byte cap: add the size column and fill it in once
   if (!db.prepare('PRAGMA table_info(queue)').all().some((c) => c.name === 'bytes')) {
     db.exec('ALTER TABLE queue ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0; UPDATE queue SET bytes = length(CAST(envelope AS BLOB));');
+  }
+  // phone history used to sit in `event` as plaintext. New rows store a seal box; `via` is the
+  // burner number, kept in the clear so burning a line can still delete its rows.
+  if (!db.prepare('PRAGMA table_info(phone_log)').all().some((c) => c.name === 'via')) {
+    db.exec('ALTER TABLE phone_log ADD COLUMN via TEXT');
   }
   const version = db.prepare("SELECT value FROM meta WHERE key = 'schema'").get()?.value;
   if (!version) db.prepare("INSERT INTO meta (key, value) VALUES ('schema', ?)").run(String(SCHEMA_VERSION));
@@ -333,7 +339,8 @@ export function openStore(file = null, { importJson = null } = {}) {
       let ok = false;
       store.tx(() => {
         if (!db.prepare('DELETE FROM burner_lines WHERE handle = ? AND number = ?').run(String(handle), String(number)).changes) return;
-        db.prepare("DELETE FROM phone_log WHERE handle = ? AND json_extract(event, '$.via') = ?").run(String(handle), String(number));
+        db.prepare('DELETE FROM phone_audio WHERE seq IN (SELECT seq FROM phone_log WHERE handle = ? AND via = ?)').run(String(handle), String(number));
+        db.prepare('DELETE FROM phone_log WHERE handle = ? AND via = ?').run(String(handle), String(number));
         db.prepare('INSERT INTO burner_pool (number, free_at) VALUES (?, ?) ON CONFLICT (number) DO UPDATE SET free_at = excluded.free_at').run(String(number), freeAt);
         ok = true;
       });
@@ -349,20 +356,45 @@ export function openStore(file = null, { importJson = null } = {}) {
       }
       return out;
     },
-    addPhoneEvent(handle, event) {
-      const at = event.at || Date.now();
-      const r = db.prepare('INSERT INTO phone_log (handle, at, event, call_sid) VALUES (?, ?, ?, ?)')
-        .run(String(handle), at, JSON.stringify(event), event.callSid ? String(event.callSid) : null);
-      return { seq: Number(r.lastInsertRowid), ...event, at };
+    /** Reserves a row so the seal can be bound to its seq. `event` stays empty until finishPhoneEvent. */
+    beginPhoneEvent(handle, { at, callSid = null, via = null }) {
+      const r = db.prepare('INSERT INTO phone_log (handle, at, event, call_sid, via) VALUES (?, ?, ?, ?, ?)')
+        .run(String(handle), at, '{}', callSid ? String(callSid) : null, via ? String(via) : null);
+      return Number(r.lastInsertRowid);
     },
-    phoneLog: (handle, limit = 100) => db.prepare('SELECT seq, at, event FROM phone_log WHERE handle = ? ORDER BY seq DESC LIMIT ?')
-      .all(String(handle), limit).map((r) => ({ ...JSON.parse(r.event), seq: r.seq, at: r.at })).reverse(),
+    finishPhoneEvent(handle, seq, box) {
+      const n = db.prepare('UPDATE phone_log SET event = ? WHERE handle = ? AND seq = ?').run(JSON.stringify(box), String(handle), Number(seq)).changes;
+      if (!n) throw new Error('phone event missing');
+    },
+    deletePhoneEvent(handle, seq) {
+      db.prepare('DELETE FROM phone_audio WHERE handle = ? AND seq = ?').run(String(handle), Number(seq));
+      db.prepare('DELETE FROM phone_log WHERE handle = ? AND seq = ?').run(String(handle), Number(seq));
+    },
+    putPhoneAudio(handle, seq, box) {
+      db.prepare('INSERT INTO phone_audio (seq, handle, box) VALUES (?, ?, ?) ON CONFLICT (seq) DO UPDATE SET box = excluded.box, handle = excluded.handle')
+        .run(Number(seq), String(handle), JSON.stringify(box));
+    },
+    phoneAudio: (handle, seq) => {
+      const r = db.prepare('SELECT box FROM phone_audio WHERE handle = ? AND seq = ?').get(String(handle), Number(seq));
+      return r ? JSON.parse(r.box) : null;
+    },
+    phoneView(row) {
+      const box = JSON.parse(row.event);
+      return { seq: row.seq, at: row.at, ...(row.via ? { via: row.via } : {}), box };
+    },
+    phoneLog: (handle, limit = 100) => db.prepare('SELECT seq, at, event, via FROM phone_log WHERE handle = ? ORDER BY seq DESC LIMIT ?')
+      .all(String(handle), limit).map((r) => store.phoneView(r)).reverse(),
     phoneEvent: (handle, seq) => {
-      const r = db.prepare('SELECT seq, at, event FROM phone_log WHERE handle = ? AND seq = ?').get(String(handle), Number(seq));
-      return r ? { ...JSON.parse(r.event), seq: r.seq, at: r.at } : null;
+      const r = db.prepare('SELECT seq, at, event, via FROM phone_log WHERE handle = ? AND seq = ?').get(String(handle), Number(seq));
+      return r ? store.phoneView(r) : null;
     },
-    callOwner: (callSid) => db.prepare('SELECT handle, event FROM phone_log WHERE call_sid = ? ORDER BY seq LIMIT 1').get(String(callSid)) || null,
-    expirePhoneLog: (before) => Number(db.prepare('DELETE FROM phone_log WHERE at < ?').run(before).changes),
+    callOwner: (callSid) => db.prepare('SELECT handle FROM phone_log WHERE call_sid = ? ORDER BY seq LIMIT 1').get(String(callSid)) || null,
+    expirePhoneLog(before) {
+      return tx(() => {
+        db.prepare('DELETE FROM phone_audio WHERE seq IN (SELECT seq FROM phone_log WHERE at < ?)').run(before);
+        return Number(db.prepare('DELETE FROM phone_log WHERE at < ?').run(before).changes);
+      });
+    },
 
     counts: () => Object.fromEntries(['accounts', 'spks', 'opks', 'queue', 'ledger'].map((t) => [t, st.count(t).get().n])),
     dump() {

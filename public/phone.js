@@ -27,6 +27,21 @@ export function formatNumber(n) {
   return m ? `+1 (${m[1]}) ${m[2]}-${m[3]}` : (n || '');
 }
 
+/** One history row, as the phone list shows it. `onFabric` is a handle from number lookup. */
+export function phoneItemLabel(e, { lineName = null } = {}) {
+  const who = formatNumber(e.peer);
+  let base;
+  switch (e.kind) {
+    case 'call': base = e.dir === 'out' ? `📞 Called ${who}` : `📞 Call from ${who}`; break;
+    case 'missed': base = `📵 Missed call from ${who}`; break;
+    case 'voicemail': base = `🎙 Voicemail from ${who} · ${e.seconds}s`; break;
+    case 'sms': base = e.dir === 'out' ? `💬 To ${who}: ${e.text}` : `💬 From ${who}: ${e.text}`; break;
+    default: base = who;
+  }
+  const withLine = e.via ? `${base} · on ${lineName || `burner ${formatNumber(e.via)}`}` : base;
+  return e.onFabric ? `${withLine} · on FabriC++` : withLine;
+}
+
 const time = (at) => new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 /**
@@ -36,7 +51,7 @@ const time = (at) => new Date(at).toLocaleString([], { month: 'short', day: 'num
  * @param {{ get: () => { records: object[], byPeer: object }, save: () => void }} [o.vault]
  *   where burner records (shared/burner.js) and each conversation's number live: the encrypted vault
  */
-export function createPhone({ request, inCall = () => false, vault = null }) {
+export function createPhone({ request, inCall = () => false, vault = null, openEvent = null, openAudio = null }) {
   const local = { records: [], byPeer: {} };
   const book = () => { const b = vault?.get() || local; b.records ??= []; b.byPeer ??= {}; return b; };
   const save = () => vault?.save();
@@ -161,7 +176,11 @@ export function createPhone({ request, inCall = () => false, vault = null }) {
     const via = lineOf(to);
     try {
       const r = await request({ type: 'sms_send', to, text, ...(via ? { via } : {}) });
-      events.set(r.event.seq, r.event);
+      const opened = await reveal(r.event);
+      if (opened) {
+        events.set(opened.seq, opened);
+        noteFabric([opened]);
+      }
       $('phone-text').value = '';
       note('Text sent.');
       renderLog();
@@ -174,8 +193,17 @@ export function createPhone({ request, inCall = () => false, vault = null }) {
     btn.disabled = true;
     try {
       const r = await request({ type: 'phone_voicemail', seq });
-      const bytes = Uint8Array.from(atob(r.audio), (c) => c.charCodeAt(0));
-      const url = URL.createObjectURL(new Blob([bytes], { type: r.mime }));
+      let mime = r.mime || 'audio/mpeg';
+      let audioB64 = r.audio;
+      if (r.box) {
+        if (typeof openAudio !== 'function') throw new Error('this device cannot open voicemail');
+        const opened = await openAudio({ box: r.box, seq });
+        audioB64 = opened.audio;
+        mime = opened.mime || mime;
+      }
+      if (!audioB64) throw new Error('recording unavailable');
+      const bytes = Uint8Array.from(atob(audioB64), (c) => c.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
       const audio = new Audio(url);
       audio.onended = () => URL.revokeObjectURL(url);
       await audio.play();
@@ -213,7 +241,38 @@ export function createPhone({ request, inCall = () => false, vault = null }) {
     }
   }
 
-  function onEvent(e) {
+  /** A sealed row becomes the event the list shows. An old relay's plaintext row is used as-is. */
+  async function reveal(e) {
+    if (!e) return null;
+    if (!e.box) return e.kind ? e : null;
+    if (typeof openEvent !== 'function') return null;
+    try {
+      const opened = await openEvent(e);
+      if (!opened || typeof opened !== 'object') return null;
+      return { ...opened, seq: e.seq, at: opened.at || e.at, via: opened.via || e.via };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Marks numbers the owner made discoverable. Uses the numbers already in this history, not a contact upload. */
+  function noteFabric(list) {
+    const numbers = [...new Set(list.map((e) => e.peer).filter((p) => p && p !== 'unknown' && E164.test(p)))].slice(0, 50);
+    if (!numbers.length) return;
+    request({ type: 'number_lookup', numbers }).then((r) => {
+      let changed = false;
+      for (const e of list) {
+        const h = r.results?.[e.peer];
+        if (h && e.onFabric !== h) { e.onFabric = h; changed = true; }
+      }
+      if (changed) renderLog();
+    }).catch(() => {});
+  }
+
+  async function onEvent(e) {
+    const opened = await reveal(e);
+    if (!opened) return;
+    e = opened;
     events.set(e.seq, e);
     // someone reached you on a burner: answering them uses that burner too
     if (e.dir === 'in' && e.via && e.peer && e.peer !== 'unknown' && !book().byPeer[e.peer]) {
@@ -221,6 +280,7 @@ export function createPhone({ request, inCall = () => false, vault = null }) {
       if (r) { book().byPeer[e.peer] = r.id; save(); renderFrom(); }
     }
     renderLog();
+    noteFabric([e]);
     if (e.kind === 'sms' && e.dir === 'in') note(`New text from ${formatNumber(e.peer)}`);
     if (e.kind === 'voicemail') note(`New voicemail from ${formatNumber(e.peer)}`);
   }
@@ -228,9 +288,15 @@ export function createPhone({ request, inCall = () => false, vault = null }) {
   async function refreshLog() {
     try {
       const r = await request({ type: 'phone_log' });
+      const list = [];
+      for (const e of r.events || []) {
+        const opened = await reveal(e);
+        if (opened) list.push(opened);
+      }
       events.clear();
-      for (const e of r.events) events.set(e.seq, e);
+      for (const e of list) events.set(e.seq, e);
       renderLog();
+      noteFabric(list);
     } catch { /* offline */ }
   }
 
@@ -290,21 +356,8 @@ export function createPhone({ request, inCall = () => false, vault = null }) {
   }
 
   function label(e) {
-    const base = baseLabel(e);
-    if (!e.via) return base;
-    const r = recordOf(e.via);
-    return `${base} · on ${r ? nameOf(r) : `burner ${formatNumber(e.via)}`}`;
-  }
-
-  function baseLabel(e) {
-    const who = formatNumber(e.peer);
-    switch (e.kind) {
-      case 'call': return e.dir === 'out' ? `📞 Called ${who}` : `📞 Call from ${who}`;
-      case 'missed': return `📵 Missed call from ${who}`;
-      case 'voicemail': return `🎙 Voicemail from ${who} · ${e.seconds}s`;
-      case 'sms': return e.dir === 'out' ? `💬 To ${who}: ${e.text}` : `💬 From ${who}: ${e.text}`;
-      default: return who;
-    }
+    const r = e.via && recordOf(e.via);
+    return phoneItemLabel(e, { lineName: r ? nameOf(r) : null });
   }
 
   function renderLog() {

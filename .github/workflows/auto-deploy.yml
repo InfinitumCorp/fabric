@@ -72,4 +72,16 @@ jobs:
         working-directory: landing
         run: |
           set -euo pipefail
+          say() { echo "$1"; echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
+          live=$(mktemp)
+          # The page at infinitumfabric.app is the live UI. Deploy only when this commit's
+          # index is the same page (CRLF ignored). A different file is left for a person to ship.
+          if ! curl -fsS https://infinitumfabric.app/ -o "$live"; then
+            say "Could not read https://infinitumfabric.app/; landing was not deployed."
+            exit 0
+          fi
+          if ! cmp -s <(tr -d '\r' < "$live") <(tr -d '\r' < public/index.html); then
+            say "landing/public/index.html is not the page infinitumfabric.app is serving. Landing was not deployed, so the live page stays as it is."
+            exit 0
+          fi
           npx -y wrangler@4 deploy

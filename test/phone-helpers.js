@@ -4,6 +4,7 @@ import WebSocket from 'ws';
 import { twilioSignature } from '../server/phone.js';
 import { generateUserIdentity, generateSigningKey, ownershipProof } from '../shared/crypto.js';
 import { signDeviceList, newDeviceId } from '../shared/devices.js';
+import { openSeal } from '../shared/sealbox.js';
 
 export const CFG = {
   accountSid: 'AC' + 'a'.repeat(32), authToken: 'auth-token-test', apiKey: 'SK' + 'b'.repeat(32),
@@ -53,7 +54,20 @@ export async function signIn(port, handle) {
   c.send({ type: 'register', handle, deviceId: dev.id, list, proof });
   const res = await c.next((m) => m.type === 'registered' || m.type === 'error');
   assert.equal(res.type, 'registered', res.error);
-  return c;
+  return Object.assign(c, { handle, deviceId: dev.id, dh: dev.keys.dh });
+}
+
+/** Open a sealed phone row (or sealed voicemail audio) with the device that signed in. */
+export async function openPhone(view, session, { audio = false } = {}) {
+  const payload = await openSeal({
+    box: view.box,
+    handle: session.handle,
+    seq: view.seq,
+    deviceId: session.deviceId,
+    privateKey: session.dh.privateJwk,
+    ...(audio ? { aad: `phone-audio|${session.handle}|${view.seq}` } : {}),
+  });
+  return { ...payload, seq: view.seq, at: view.at ?? payload.at, via: payload.via || view.via };
 }
 
 export async function webhook(port, path, params, { sign = true } = {}) {

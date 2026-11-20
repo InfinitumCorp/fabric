@@ -1,9 +1,11 @@
 // FABRIC Phone: a real phone number per account, through Twilio. Calls to and from ordinary phones
 // (in the browser via the Twilio Voice SDK), voicemail, and SMS.
 //
-// This leaves FABRIC's end-to-end encryption: the phone network carries audio and texts in the
-// clear, so Twilio and the carriers can see them, and the relay stores call history and texts
-// (30 days) to deliver them to every device. The app says so wherever phone calls appear.
+// This leaves FABRIC's end-to-end encryption on the phone network: Twilio and the carriers see
+// audio and texts in the clear. The relay does not keep that history. Each event is sealed to the
+// account's devices (shared/sealbox.js) and only the box is stored, for 30 days. Voicemail audio
+// is fetched, sealed the same way, and deleted from Twilio. The app says the phone network itself
+// is not end-to-end encrypted wherever phone calls appear.
 //
 // Configuration (all required to turn it on):
 //   TWILIO_ACCOUNT_SID     AC…   the account
@@ -24,7 +26,9 @@
 // URL is {FABRIC_PUBLIC_URL}/api/phone/sms (both HTTP POST).
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { isValidHandle } from '../shared/crypto.js';
+import { isPublicJwk, isValidHandle } from '../shared/crypto.js';
+import { DEVICE_ID_RE } from '../shared/devices.js';
+import { isPhoneBox, sealToDevices } from '../shared/sealbox.js';
 import { Buckets } from './limits.js';
 import { BUNDLES } from '../shared/burner.js';
 
@@ -148,10 +152,40 @@ export function createPhone({ cfg, store, notify, log = console.log, fetchImpl =
   const burnNow = (handle, number) => store.burnLine(handle, number, Date.now() + burnerCfg.cooldownMs);
   const auth = 'Basic ' + Buffer.from(`${cfg.apiKey}:${cfg.apiSecret}`).toString('base64');
 
-  function record(handle, event) {
-    const e = store.addPhoneEvent(handle, event);
-    notify(handle, { type: 'phone_event', event: e });
-    return e;
+  function deviceKeys(handle) {
+    const devices = store.getList(handle)?.payload?.devices || [];
+    return devices
+      .filter((d) => DEVICE_ID_RE.test(String(d?.id || '')) && isPublicJwk(d.dh))
+      .map((d) => ({ id: d.id, dh: d.dh }));
+  }
+
+  /**
+   * Seal one phone event to the account's devices and store only the box.
+   * Nothing in `event` (peer, text, recording) is written in the clear. `via` is, so a burned
+   * line can still have its rows deleted. Returns the view a device is sent, or null when the
+   * account has no device keys (the content is dropped, not stored in the clear).
+   */
+  async function record(handle, event, { notifyNow = true } = {}) {
+    const at = event.at || Date.now();
+    const via = event.via || null;
+    const callSid = event.callSid || null;
+    const devices = deviceKeys(handle);
+    if (!devices.length) {
+      log(`[phone] ${handle}: history not stored (no device keys)`);
+      return null;
+    }
+    const seq = store.beginPhoneEvent(handle, { at, callSid, via });
+    try {
+      const box = await sealToDevices({ payload: { ...event, at }, handle, seq, devices });
+      store.finishPhoneEvent(handle, seq, box);
+      const view = { seq, at, ...(via ? { via } : {}), box };
+      if (notifyNow) notify(handle, { type: 'phone_event', event: view });
+      return view;
+    } catch (e) {
+      store.deletePhoneEvent(handle, seq);
+      log(`[phone] ${handle}: history not stored (${e.message})`);
+      return null;
+    }
   }
 
   async function readForm(req, max = 20_000) {
@@ -194,7 +228,7 @@ export function createPhone({ cfg, store, notify, log = console.log, fetchImpl =
         if (!number) return twiml(via ? '<Say>That burner number is no longer yours.</Say><Hangup/>' : '<Say>This FABRIC account has no phone number.</Say><Hangup/>');
         if (!dialable(to, cfg.countries)) return twiml('<Say>That number cannot be called from FABRIC.</Say><Hangup/>');
         if (buckets.call.take(handle)) return twiml('<Say>Too many calls. Please try again later.</Say><Hangup/>');
-        record(handle, { kind: 'call', dir: 'out', peer: to, callSid: p.CallSid, status: 'dialing', ...(via ? { via } : {}) });
+        await record(handle, { kind: 'call', dir: 'out', peer: to, callSid: p.CallSid, status: 'dialing', ...(via ? { via } : {}) });
         return twiml(`<Dial callerId="${esc(number)}" answerOnBridge="true" timeLimit="14400"><Number>${esc(to)}</Number></Dial>`);
       }
       case '/api/phone/incoming': {
@@ -203,7 +237,7 @@ export function createPhone({ cfg, store, notify, log = console.log, fetchImpl =
         const { handle } = owner;
         const via = owner.burner ? p.To : null;
         const from = E164_RE.test(p.From || '') ? p.From : 'unknown';
-        record(handle, { kind: 'call', dir: 'in', peer: from, callSid: p.CallSid, status: 'ringing', ...(via ? { via } : {}) });
+        await record(handle, { kind: 'call', dir: 'in', peer: from, callSid: p.CallSid, status: 'ringing', ...(via ? { via } : {}) });
         return twiml(
           `<Dial timeout="${RING_SECONDS}" action="${at('/api/phone/missed', { n: p.To })}">`
           + `<Client><Identity>${esc(identityOf(handle))}</Identity><Parameter name="from" value="${esc(from)}"/>${via ? `<Parameter name="via" value="${esc(via)}"/>` : ''}</Client></Dial>`,
@@ -215,10 +249,14 @@ export function createPhone({ cfg, store, notify, log = console.log, fetchImpl =
         const owner = store.ownerOfNumber(n);
         const handle = owner?.handle;
         if (!handle || p.DialCallStatus === 'completed' || p.DialCallStatus === 'answered') return twiml('<Hangup/>');
-        record(handle, { kind: 'missed', dir: 'in', peer: E164_RE.test(p.From || '') ? p.From : 'unknown', callSid: p.CallSid, ...(owner.burner ? { via: n } : {}) });
+        const from = E164_RE.test(p.From || '') ? p.From : 'unknown';
+        await record(handle, { kind: 'missed', dir: 'in', peer: from, callSid: p.CallSid, ...(owner.burner ? { via: n } : {}) });
+        // the peer rides on our own callback so the voicemail can name the caller without the relay
+        // reading an older row back (that row is sealed)
+        const cb = { n: url.searchParams.get('n'), ...(from !== 'unknown' ? { peer: from } : {}) };
         return twiml(
           '<Say>The person you are calling is not available. Leave a message after the tone.</Say>'
-          + `<Record maxLength="${VOICEMAIL_SECONDS}" playBeep="true" recordingStatusCallback="${at('/api/phone/recording', { n: url.searchParams.get('n') })}"/>`
+          + `<Record maxLength="${VOICEMAIL_SECONDS}" playBeep="true" recordingStatusCallback="${at('/api/phone/recording', cb)}"/>`
           + '<Say>No message was recorded. Goodbye.</Say>',
         );
       }
@@ -227,14 +265,37 @@ export function createPhone({ cfg, store, notify, log = console.log, fetchImpl =
         const owner = store.ownerOfNumber(n);
         const handle = owner?.handle;
         if (!handle || p.RecordingStatus !== 'completed' || !/^RE[0-9a-f]{32}$/i.test(p.RecordingSid || '')) return twiml();
-        const call = p.CallSid && store.callOwner(p.CallSid);
-        const peer = call ? JSON.parse(call.event).peer : 'unknown';
-        record(handle, { kind: 'voicemail', dir: 'in', peer, recording: p.RecordingSid, seconds: Number(p.RecordingDuration) || 0, ...(owner.burner ? { via: n } : {}) });
+        const peer = E164_RE.test(url.searchParams.get('peer') || '') ? url.searchParams.get('peer')
+          : (E164_RE.test(p.From || '') ? p.From : 'unknown');
+        const view = await record(handle, {
+          kind: 'voicemail', dir: 'in', peer, seconds: Number(p.RecordingDuration) || 0, ...(owner.burner ? { via: n } : {}),
+        }, { notifyNow: false });
+        if (view) {
+          try {
+            const rec = p.RecordingSid;
+            const audio = await fetchImpl(`${API}/Accounts/${cfg.accountSid}/Recordings/${rec}.mp3`, { headers: { authorization: auth } });
+            if (audio.ok) {
+              const buf = Buffer.from(await audio.arrayBuffer());
+              if (buf.length && buf.length <= MAX_RECORDING_BYTES) {
+                const box = await sealToDevices({
+                  payload: { mime: 'audio/mpeg', audio: buf.toString('base64') },
+                  handle, seq: view.seq, devices: deviceKeys(handle),
+                  aad: `phone-audio|${handle}|${view.seq}`,
+                });
+                store.putPhoneAudio(handle, view.seq, box);
+                await fetchImpl(`${API}/Accounts/${cfg.accountSid}/Recordings/${rec}.json`, { method: 'DELETE', headers: { authorization: auth } }).catch(() => {});
+              }
+            }
+          } catch (e) {
+            log(`[phone] voicemail audio not sealed: ${e.message}`);
+          }
+          notify(handle, { type: 'phone_event', event: view });
+        }
         return twiml();
       }
       case '/api/phone/sms': {
         const owner = store.ownerOfNumber(p.To);
-        if (owner) record(owner.handle, { kind: 'sms', dir: 'in', peer: E164_RE.test(p.From || '') ? p.From : 'unknown', text: String(p.Body || '').slice(0, MAX_SMS), ...(owner.burner ? { via: p.To } : {}) });
+        if (owner) await record(owner.handle, { kind: 'sms', dir: 'in', peer: E164_RE.test(p.From || '') ? p.From : 'unknown', text: String(p.Body || '').slice(0, MAX_SMS), ...(owner.burner ? { via: p.To } : {}) });
         return twiml();
       }
     }
@@ -269,18 +330,17 @@ export function createPhone({ cfg, store, notify, log = console.log, fetchImpl =
         });
         const out = await r.json().catch(() => ({}));
         if (!r.ok) return fail(`carrier refused the text: ${String(out.message || r.status).slice(0, 200)}`);
-        const e = record(me.handle, { kind: 'sms', dir: 'out', peer: to, text, sid: out.sid, ...(via ? { via } : {}) });
+        const e = await record(me.handle, { kind: 'sms', dir: 'out', peer: to, text, sid: out.sid, ...(via ? { via } : {}) });
+        if (!e) return fail('could not store the text on this account');
         return reply({ type: 'sms_sent', event: e });
       }
       case 'phone_voicemail': {
-        const e = store.phoneEvent(me.handle, msg.seq);
-        if (!e || e.kind !== 'voicemail') return fail('no such voicemail');
+        const seq = Number(msg.seq);
+        if (!store.phoneEvent(me.handle, seq)) return fail('no such voicemail');
         if (buckets.fetchVm.take(me.addr)) return fail('rate limited');
-        const r = await fetchImpl(`${API}/Accounts/${cfg.accountSid}/Recordings/${e.recording}.mp3`, { headers: { authorization: auth } });
-        if (!r.ok) return fail('recording unavailable');
-        const buf = Buffer.from(await r.arrayBuffer());
-        if (buf.length > MAX_RECORDING_BYTES) return fail('recording too large');
-        return reply({ type: 'phone_voicemail', seq: e.seq, mime: 'audio/mpeg', audio: buf.toString('base64') });
+        const box = store.phoneAudio(me.handle, seq);
+        if (!box) return fail('recording unavailable');
+        return reply({ type: 'phone_voicemail', seq, box });
       }
       // ----- burner numbers -----
       case 'burner_create': {
@@ -340,4 +400,39 @@ export function createPhone({ cfg, store, notify, log = console.log, fetchImpl =
   }
 
   return { http, ws, expire, grant, status, pushStatus, burnersEnabled: burnerCfg.enabled };
+}
+
+/**
+ * Databases from before sealing hold the event itself in `phone_log.event`. Seal each one to the
+ * account's current devices, or delete it when there is nobody to seal it to. Already-sealed rows
+ * are left alone. Runs at relay start, before the relay answers anyone.
+ */
+export async function migratePlainPhone(store) {
+  let rows;
+  try {
+    rows = store.db.prepare('SELECT seq, handle, event, via FROM phone_log').all();
+  } catch {
+    return 0;
+  }
+  let n = 0;
+  for (const row of rows) {
+    let parsed = null;
+    try { parsed = JSON.parse(row.event); } catch { parsed = null; }
+    if (isPhoneBox(parsed)) continue;
+    const devices = (store.getList(row.handle)?.payload?.devices || [])
+      .filter((d) => DEVICE_ID_RE.test(String(d?.id || '')) && isPublicJwk(d.dh))
+      .map((d) => ({ id: d.id, dh: d.dh }));
+    if (!parsed || typeof parsed.kind !== 'string' || !devices.length) {
+      store.deletePhoneEvent(row.handle, row.seq);
+      n++;
+      continue;
+    }
+    const box = await sealToDevices({ payload: parsed, handle: row.handle, seq: row.seq, devices });
+    store.finishPhoneEvent(row.handle, row.seq, box);
+    if (!row.via && typeof parsed.via === 'string' && parsed.via) {
+      store.db.prepare('UPDATE phone_log SET via = ? WHERE seq = ?').run(parsed.via, row.seq);
+    }
+    n++;
+  }
+  return n;
 }

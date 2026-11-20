@@ -6,7 +6,8 @@ import {
   accessToken, twilioSignature, validSignature, dialable, identityOf, handleOfIdentity, phoneFromEnv,
 } from '../server/phone.js';
 import { createRelay } from '../server/relay.js';
-import { toE164, formatNumber } from '../public/phone.js';
+import { toE164, formatNumber, phoneItemLabel } from '../public/phone.js';
+import { openPhone } from './phone-helpers.js';
 import { generateUserIdentity, generateSigningKey, ownershipProof } from '../shared/crypto.js';
 import { signDeviceList, newDeviceId } from '../shared/devices.js';
 
@@ -110,7 +111,7 @@ async function signIn(port, handle) {
   c.send({ type: 'register', handle, deviceId: dev.id, list, proof });
   const res = await c.next((m) => m.type === 'registered' || m.type === 'error');
   assert.equal(res.type, 'registered', res.error);
-  return c;
+  return Object.assign(c, { handle, deviceId: dev.id, dh: dev.keys.dh });
 }
 
 async function webhook(port, path, params, { sign = true } = {}) {
@@ -129,6 +130,7 @@ test('relay: a number per account; calls, voicemail and texts reach its devices'
     sent.push({ url, init });
     if (url.endsWith('/Messages.json')) return new Response(JSON.stringify({ sid: 'SM' + '1'.repeat(32) }), { status: 201 });
     if (url.endsWith('.mp3')) return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    if (init?.method === 'DELETE') return new Response('', { status: 204 });
     return new Response('{}', { status: 404 });
   };
   const relay = await createRelay({ port: 0, dataFile: null, log: () => {}, phone: CFG, fetchImpl, operatorToken: 'op' });
@@ -158,7 +160,8 @@ test('relay: a number per account; calls, voicemail and texts reach its devices'
 
   // the CSP lets the SDK reach Twilio; the SDK itself comes from this origin
   const page = await fetch(base + '/');
-  assert.match(page.headers.get('content-security-policy'), /connect-src 'self' https:\/\/api2\.amplitude\.com https:\/\/api\.amplitude\.com https:\/\/\*\.twilio\.com wss:\/\/\*\.twilio\.com/);
+  assert.match(page.headers.get('content-security-policy'), /connect-src 'self' https:\/\/\*\.twilio\.com wss:\/\/\*\.twilio\.com/);
+  assert.doesNotMatch(page.headers.get('content-security-policy'), /amplitude/);
   assert.equal((await fetch(base + '/vendor/twilio.min.js')).status, 200);
 
   // webhooks without Twilio's signature are refused
@@ -170,26 +173,39 @@ test('relay: a number per account; calls, voicemail and texts reach its devices'
   assert.equal(inc.status, 200);
   assert.match(inc.body, /<Dial timeout="25" action="https:\/\/fabric\.example\.test\/api\/phone\/missed\?n=%2B15550001111"><Client><Identity>ana<\/Identity>/);
   assert.match(inc.body, /<Parameter name="from" value="\+15557654321"\/>/);
-  assert.equal((await ana.next((m) => m.type === 'phone_event')).event.kind, 'call');
+  const ringing = await openPhone((await ana.next((m) => m.type === 'phone_event')).event, ana);
+  assert.equal(ringing.kind, 'call');
   assert.match((await webhook(port, '/api/phone/incoming', { To: '+15559999999', From: '+15557654321' })).body, /not in service/);
   assert.match((await webhook(port, '/api/phone/missed?n=%2B15550001111', { DialCallStatus: 'completed' })).body, /<Hangup\/>/);
   const missed = await webhook(port, '/api/phone/missed?n=%2B15550001111', { DialCallStatus: 'no-answer', From: '+15557654321', CallSid: callSid });
   assert.match(missed.body, /<Record maxLength="120"/);
-  await webhook(port, '/api/phone/recording?n=%2B15550001111', {
+  const cb = new URL(missed.body.match(/recordingStatusCallback="([^"]+)"/)[1].replaceAll('&amp;', '&'));
+  assert.equal(cb.searchParams.get('peer'), '+15557654321');
+  await webhook(port, `${cb.pathname}${cb.search}`, {
     RecordingStatus: 'completed', RecordingSid: 'RE' + 'f'.repeat(32), RecordingDuration: '14', CallSid: callSid,
   });
   await webhook(port, '/api/phone/sms', { To: '+15550001111', From: '+15557654321', Body: 'hello <b>' });
 
   const { events } = await ana.ask({ type: 'phone_log' }, 'phone_log');
-  assert.deepEqual(events.map((e) => e.kind), ['call', 'missed', 'voicemail', 'sms']);
-  const vm = events[2];
+  const wire = JSON.stringify(events);
+  assert.equal(wire.includes('hello'), false, 'the text is not on the wire in the clear');
+  assert.equal(wire.includes('+15557654321'), false, 'the caller number is not on the wire in the clear');
+  const opened = [];
+  for (const e of events) opened.push(await openPhone(e, ana));
+  assert.deepEqual(opened.map((e) => e.kind), ['call', 'missed', 'voicemail', 'sms']);
+  const vm = opened[2];
   assert.equal(vm.peer, '+15557654321', 'the voicemail knows who called');
   assert.equal(vm.seconds, 14);
-  assert.equal(events[3].text, 'hello <b>');
-  const audio = await ana.ask({ type: 'phone_voicemail', seq: vm.seq }, 'phone_voicemail');
+  assert.equal(opened[3].text, 'hello <b>');
+  assert.equal(phoneItemLabel({ ...opened[3], onFabric: '@ana.veil' }).endsWith('· on FabriC++'), true);
+  const beforeAudio = sent.length;
+  const audioMsg = await ana.ask({ type: 'phone_voicemail', seq: vm.seq }, 'phone_voicemail');
+  assert.equal(sent.length, beforeAudio, 'playback does not ask Twilio again');
+  const audio = await openPhone({ box: audioMsg.box, seq: audioMsg.seq }, ana, { audio: true });
   assert.equal(audio.audio, Buffer.from([1, 2, 3]).toString('base64'));
-  assert.match(sent.at(-1).url, /\/Recordings\/REf{32}\.mp3$/);
-  assert.match(sent.at(-1).init.headers.authorization, /^Basic /);
+  assert.ok(sent.some((s) => /\/Recordings\/REf{32}\.mp3$/.test(s.url)));
+  assert.ok(sent.some((s) => s.init?.method === 'DELETE' && /\/Recordings\/REf{32}\.json$/.test(s.url)));
+  assert.match(sent.find((s) => s.url.endsWith('.mp3')).init.headers.authorization, /^Basic /);
 
   // ana texts back: From is her number; bad destinations never reach the carrier
   const before = sent.length;
@@ -197,7 +213,8 @@ test('relay: a number per account; calls, voicemail and texts reach its devices'
   await assert.rejects(ana.ask({ type: 'sms_send', to: '+15557654321', text: '' }, 'sms_sent'), /characters/);
   assert.equal(sent.length, before);
   const r = await ana.ask({ type: 'sms_send', to: '+15557654321', text: 'got it' }, 'sms_sent');
-  assert.equal(r.event.dir, 'out');
+  assert.equal(JSON.stringify(r.event).includes('got it'), false);
+  assert.equal((await openPhone(r.event, ana)).dir, 'out');
   const body = new URLSearchParams(sent.at(-1).init.body);
   assert.deepEqual(Object.fromEntries(body), { From: '+15550001111', To: '+15557654321', Body: 'got it' });
 

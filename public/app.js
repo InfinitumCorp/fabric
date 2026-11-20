@@ -23,6 +23,7 @@ import { createPhone, toE164, formatNumber } from '/phone.js';
 import { mountDialpad, isTouch } from '/dialpad.js';
 import { mountSpaces } from '/spaces.js';
 import { seal, peekSealed, openSealed, isDeliveryKey } from '/shared/sealed.js';
+import { openSeal } from '/shared/sealbox.js';
 import { applyAction, actionPayload, quoteOf, extrasOf, reactionSummary, QUICK_REACTIONS, isTtl, ttlLabel } from '/shared/actions.js';
 import {
   mediaOf, mediaLabel, fmtBytes, fmtDuration, MAX_MEDIA_BYTES, receiptPayload, applyReceipt, unreadFrom,
@@ -352,7 +353,16 @@ async function handle(msg) {
       if (isDeliveryKey(msg.deliveryKey)) db.deliveryKey = msg.deliveryKey;
       setConn('connected', true);
       bots?.onSignedIn();
-      phone ??= createPhone({ request, inCall: () => Boolean(calls?.active), vault: { get: () => (db.burners ??= { records: [], byPeer: {} }), save: () => persist() } });
+      phone ??= createPhone({
+        request,
+        inCall: () => Boolean(calls?.active),
+        vault: { get: () => (db.burners ??= { records: [], byPeer: {} }), save: () => persist() },
+        openEvent: (view) => openSeal({ box: view.box, handle: db.handle, seq: view.seq, deviceId: db.deviceId, privateKey: privateOf(identity.dh) }),
+        openAudio: (view) => openSeal({
+          box: view.box, handle: db.handle, seq: view.seq, deviceId: db.deviceId, privateKey: privateOf(identity.dh),
+          aad: `phone-audio|${db.handle}|${view.seq}`,
+        }),
+      });
       phone.refresh();
       request({ type: 'number_status' }).then(onNumberStatus).catch(() => {});
       await adoptOwnList(msg.list);

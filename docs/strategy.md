@@ -47,7 +47,7 @@ choose.
 | Handles | Shown as `+name.veil`; stored as `@name.veil` because signed device lists depend on it. `+` or `@` both accepted when typed |
 | Burner numbers | Paused (`FABRIC_BURNERS=1` to turn back on); no burner screens in the app |
 | Number linking, Phase 1 | Built and tested: verify by text code, keyed-hash storage, opt-in discovery, encrypted call/chat instead of the phone network ([number-linking.md](number-linking.md)) |
-| Number linking, Phase 2 | In progress: `shared/sealbox.js` (seal to every device of an account) written, not wired in |
+| Number linking, Phase 2 | Built: phone events and voicemail audio are sealed to the account's devices |
 | Number linking, Phase 3 | Not started: on-FabriC++ badges in phone history, opt-in contact matching |
 | Prod go-live of linking | Waiting on owner: a Twilio Verify service SID and `FABRIC_NUMBER_PEPPER` on the prod relay, then a restart |
 | Android icon | Arial "F" adaptive icon (from the MasterBuild session) |
@@ -55,7 +55,7 @@ choose.
 ## Next, in order
 
 1. Owner decides the track question above.
-2. Finish Phase 2: phone events and voicemail sealed to devices; the relay keeps only time, kind and call IDs.
+2. Phase 2 is in: phone events and voicemail audio are sealed to devices. The relay keeps the time, the account and, for a burner, the line.
 3. Phase 3: badges and opt-in contact matching on Android.
 4. Turn on linking in prod once Twilio Verify and the pepper are set.
 5. Roadmap in the README (Cumulus://ID, multi-region SFU, relay scale, $FAB) after that.

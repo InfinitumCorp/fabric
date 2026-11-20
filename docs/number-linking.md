@@ -5,9 +5,10 @@ Status (2026-11-09):
 - **Phase 1 built and tested** (`server/links.js`, `test/phone-links.test.js`, Settings → Your phone number,
   + → Call a phone number). Runs on the dev relay with `FABRIC_NUMBER_VERIFY=dev`. Prod needs
   `TWILIO_VERIFY_SERVICE_SID` and `FABRIC_NUMBER_PEPPER` set, then a restart.
-- **Phase 2 in progress**: `shared/sealbox.js` written (see Phase 2 below), not yet wired into the store,
-  `server/phone.js` or the client.
-- **Phase 3 not started.**
+- **Phase 2 built**: `shared/sealbox.js` seals each phone event and voicemail audio to the account's
+  devices. The relay stores the box. A startup migration seals or deletes older plaintext rows.
+- **Phase 3, badges**: the phone list looks up numbers already in that history and marks a discoverable
+  FabriC++ account on the existing row. Contact-book upload and private set intersection are not built.
 - Decisions taken: discoverable is **off** by default with a prompt after verifying; any number that can receive
   the code; `+1` at launch (`FABRIC_LINK_COUNTRIES`).
 - See [strategy.md](strategy.md) for how this fits with the Matrix track on `main`.

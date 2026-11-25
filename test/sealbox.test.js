@@ -64,9 +64,10 @@ test('a phone box opens only for a device it was sealed to, and only for its own
 
 test('plaintext phone rows are sealed on startup, or deleted when the account has no device', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fabric-phone-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const store = openStore(path.join(dir, 'fabric.db'));
-  t.after(() => store.close());
+  // after hooks run in the order they are added: close the database before removing its folder
+  // (Windows refuses to delete an open file)
+  t.after(() => { store.close(); fs.rmSync(dir, { recursive: true, force: true }); });
   const acct = await generateSigningKey();
   const dev = { id: newDeviceId(), keys: await generateUserIdentity() };
   const list = await signDeviceList(acct.privateJwk, {

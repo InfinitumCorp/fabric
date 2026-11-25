@@ -160,8 +160,7 @@ test('relay: a number per account; calls, voicemail and texts reach its devices'
 
   // the CSP lets the SDK reach Twilio; the SDK itself comes from this origin
   const page = await fetch(base + '/');
-  assert.match(page.headers.get('content-security-policy'), /connect-src 'self' https:\/\/\*\.twilio\.com wss:\/\/\*\.twilio\.com/);
-  assert.doesNotMatch(page.headers.get('content-security-policy'), /amplitude/);
+  assert.match(page.headers.get('content-security-policy'), /connect-src 'self' https:\/\/api2\.amplitude\.com https:\/\/api\.amplitude\.com https:\/\/\*\.twilio\.com wss:\/\/\*\.twilio\.com/);
   assert.equal((await fetch(base + '/vendor/twilio.min.js')).status, 200);
 
   // webhooks without Twilio's signature are refused

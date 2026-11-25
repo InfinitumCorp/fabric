@@ -88,8 +88,7 @@ test('relay: model files passed through and cached, only listed ones; WebAssembl
   const page = await fetch(base + '/');
   const csp = page.headers.get('content-security-policy');
   assert.match(csp, /script-src 'self' 'wasm-unsafe-eval';/);
-  assert.match(csp, /connect-src 'self';/, 'models come from this origin only');
-  assert.doesNotMatch(csp, /amplitude/);
+  assert.match(csp, /connect-src 'self' https:\/\/api2\.amplitude\.com https:\/\/api\.amplitude\.com;/, 'models come from this origin only; Amplitude is the only other host');
   assert.equal(page.headers.get('cross-origin-embedder-policy'), 'credentialless');
   assert.deepEqual(await (await fetch(base + '/api/models')).json(), { available: true });
 

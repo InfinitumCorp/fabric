@@ -324,10 +324,10 @@ export async function createRelay({
     // Defense in depth for keys held in the page: no third-party script, no framing, no inline code.
     // 'wasm-unsafe-eval' lets on-device models compile WebAssembly (served from here); not JS eval.
     // With FABRIC Phone on, the Twilio Voice SDK (served from this origin) talks to Twilio's servers.
-    // No analytics host is allowed: the page does not load a tracker.
+    // Amplitude (page views and sessions, vendored SDK served from here) posts to api2/api.amplitude.com.
     const twilio = phoneSvc ? ' https://*.twilio.com wss://*.twilio.com' : '';
     res.setHeader('content-security-policy',
-      `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self'${twilio}; img-src 'self' data:; ` +
+      `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self' https://api2.amplitude.com https://api.amplitude.com${twilio}; img-src 'self' data:; ` +
       `media-src 'self' blob:${phoneSvc ? ' https://sdk.twilio.com' : ''}; ` +
       "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
     res.setHeader('x-content-type-options', 'nosniff');

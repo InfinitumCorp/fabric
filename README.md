@@ -529,6 +529,7 @@ existing `data/state-v3.json` is imported once and renamed to `.imported`.
 | `FABRIC_TLS_CERT`, `FABRIC_TLS_KEY` | PEM files. Serves HTTPS/WSS and sends HSTS. |
 | `FABRIC_ORIGINS` | Comma-separated origins allowed to open a WebSocket. Default: the relay's own host. |
 | `FABRIC_TRUST_PROXY=1` | Take the client IP from `X-Forwarded-For` (only behind your own proxy). |
+| `FABRIC_REGISTER_POW_BITS` | Work a new address costs (`shared/pow.js`): leading zero bits of SHA-256 over the connection's nonce, the handle and a counter. Default 16 (about 65,000 hashes, under a second in a browser); 0 turns it off; at most 28. Signing in to an existing address, or registering with a Cumulus://ID that has no address yet, costs nothing. |
 | `FABRIC_QUEUE_MAX_MB` | Most megabytes of undelivered envelopes kept for one device (default 100; also at most 1,000 envelopes). Past that, senders get `recipient queue full` until the device comes online and acknowledges. |
 | `FABRIC_ICE_SERVERS` | STUN/TURN list for calls (see above). |
 | `FABRIC_SFU`, `FABRIC_SFU_PUBLIC_IP`, `FABRIC_SFU_PORTS` | Large-call media server (see Large calls). |
@@ -669,7 +670,7 @@ Current status and the open question about this branch versus the Matrix build o
 4. **$FAB on Solana**: SPL token, payouts to FIRM Wallet, settlement hashes anchored on Firmament.
 5. **Transports**: ÆTHER mesh (burner records are already compatible: `aether-mesh` numbers), Spectre CRM logging (opt-in), E(O)N voice.
 6. **Buyer side**: approved-buyer licensing, aggregation with k-anonymity or differential privacy before any sale.
-7. **Relay scale & privacy**: sybil resistance for handle registration, several relay processes sharing one database (Postgres), and per-account storage quotas.
+7. **Relay scale & privacy**: stronger sybil resistance than the registration work and `FABRIC_CID_REQUIRED` already give, several relay processes sharing one database (Postgres), and per-account storage quotas.
 8. **Burner numbers, further**: real checkout and billing (Stripe or the Infinitum plan) wired to `/api/phone/bundles`, buying pool numbers from Twilio automatically when the pool runs low, a signed remote "burn all" for a lost device, and numbers outside +1.
 
 ## Repository layout: two client lines

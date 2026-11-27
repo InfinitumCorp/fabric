@@ -12,6 +12,7 @@ import WebSocket from 'ws';
 import { generateUserIdentity, generateSigningKey, ownershipProof, privateOf, newMessageId } from '../shared/crypto.js';
 import { signDeviceList, verifyDeviceList, newDeviceId, deviceAddr, findDevice } from '../shared/devices.js';
 import { SessionManager, emptyStore } from '../shared/session.js';
+import { solvePow } from '../shared/pow.js';
 import { peekSealed, openSealed, isDeliveryKey } from '../shared/sealed.js';
 
 const SEEN_KEEP = 2000;
@@ -41,6 +42,12 @@ export function createBotDevice({ state, save, onMessage, log = console.log, now
   let ws = null;
   let stopped = false;
   let registered = false;
+  let hello = null; // this connection's hello (relay key, nonce, how much work a new address costs)
+  let powFor = null;
+  const registerNow = async (pow = undefined) => {
+    const proof = await ownershipProof(privateOf(state.device.keys.dh), hello.relayKey, hello.nonce);
+    wsSend({ type: 'register', handle: me.handle, deviceId: me.deviceId, list: state.list, proof, ...(pow ? { pow } : {}) });
+  };
   let deliveryKey = null;
   let refSeq = 0;
   const pending = new Map(); // ref -> { type, resolve, reject, timer }
@@ -155,8 +162,8 @@ export function createBotDevice({ state, save, onMessage, log = console.log, now
     }
     switch (m.type) {
       case 'hello': {
-        const proof = await ownershipProof(privateOf(state.device.keys.dh), m.relayKey, m.nonce);
-        return wsSend({ type: 'register', handle: me.handle, deviceId: me.deviceId, list: state.list, proof });
+        hello = m;
+        return registerNow();
       }
       case 'registered':
         registered = true;
@@ -176,6 +183,14 @@ export function createBotDevice({ state, save, onMessage, log = console.log, now
         work = work.then(() => onDeliver(m.envelope)).catch((e) => log(`[${tag}] ${e.message}`));
         return;
       case 'error':
+        // a new address costs a little work (shared/pow.js): once per connection
+        if (!registered && m.error === 'proof of work needed' && Number.isInteger(m.powBits) && powFor !== hello) {
+          powFor = hello;
+          const here = hello;
+          const pow = await solvePow({ nonce: here.nonce, handle: me.handle, bits: m.powBits });
+          if (hello === here) return registerNow(pow);
+          return;
+        }
         if (!registered) log(`[${tag}] relay refused sign-in for +${me.handle.slice(1)}: ${m.error}`);
         return;
       default:

@@ -9,6 +9,7 @@ import {
   linkConfirmCode, newLinkNonce, LINK_NONCE_RE,
 } from '/shared/devices.js';
 import { qrMatrix } from '/shared/qr.js';
+import { solvePow } from '/shared/pow.js';
 import { startHandleDisplay } from '/handle-display.js';
 import { linkChannelKey, sealJson, openJson, newRecoveryKey, parseRecoveryKey, sealBackup, openBackup } from '/shared/channel.js';
 import { Vault, MIN_PASSPHRASE } from '/shared/vault.js';
@@ -328,10 +329,21 @@ function request(obj) {
   });
 }
 
-async function register() {
+async function register(pow = undefined) {
   if (!db.self || !identity) return; // still opening or upgrading the vault; opened() registers
   const proof = await ownershipProof(privateOf(identity.dh), hello.relayKey, hello.nonce);
-  wsSend({ type: 'register', handle: db.handle, deviceId: db.deviceId, list: db.self.list, proof });
+  wsSend({ type: 'register', handle: db.handle, deviceId: db.deviceId, list: db.self.list, proof, ...(pow ? { pow } : {}) });
+}
+
+// A new address costs a little work (shared/pow.js); the relay says so, and how much, the first time.
+let powFor = null; // the hello it was solved for, so it is done at most once per connection
+async function registerWithWork(bits) {
+  if (powFor === hello) return false;
+  powFor = hello;
+  const here = hello;
+  const pow = await solvePow({ nonce: here.nonce, handle: db.handle, bits });
+  if (hello === here) register(pow); // not if the connection changed meanwhile
+  return true;
 }
 
 let spacesUi = null; // public/spaces.js, mounted with the other controls below
@@ -409,6 +421,7 @@ async function handle(msg) {
       return onMailbox(msg.from, msg.payload);
     case 'error': {
       if (msg.ref && msg.toDevice) return settleCopy({ id: msg.ref, to: msg.to, toDevice: msg.toDevice }, 'failed', msg.error);
+      if (msg.error === 'proof of work needed' && Number.isInteger(msg.powBits) && await registerWithWork(msg.powBits)) return;
       if (onboardWait) {
         onboardWait.reject(new Error(msg.error === 'handle taken' ? 'That address is taken.' : msg.error));
         onboardWait = null;

@@ -48,6 +48,7 @@ import { createPlus, paymentsFromEnv } from './plus.js';
 import { createSpaces } from './spaces.js';
 import { createAds } from './ads.js';
 import { MAX_UPLOAD_BYTES, TIERS } from '../shared/tiers.js';
+import { checkPow, POW_MAX_BITS } from '../shared/pow.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MAX_ENVELOPE_BYTES = 512 * 1024; // link payloads carry a history snapshot
@@ -117,6 +118,14 @@ function sameSecret(given, expected) {
   return timingSafeEqual(a, b);
 }
 
+/** Leading zero bits of work a new address costs (FABRIC_REGISTER_POW_BITS, default 16; 0 = none). */
+function powBitsFromEnv(env = process.env) {
+  if (env.FABRIC_REGISTER_POW_BITS === undefined || env.FABRIC_REGISTER_POW_BITS === '') return 16;
+  const n = Number(env.FABRIC_REGISTER_POW_BITS);
+  if (!Number.isInteger(n) || n < 0 || n > POW_MAX_BITS) throw new Error(`FABRIC_REGISTER_POW_BITS must be 0-${POW_MAX_BITS}`);
+  return n;
+}
+
 function queueBytesFromEnv(env = process.env) {
   const mb = Number(env.FABRIC_QUEUE_MAX_MB);
   return Number.isFinite(mb) && mb > 0 ? Math.floor(mb * 1024 * 1024) : MAX_QUEUE_BYTES;
@@ -134,6 +143,7 @@ export async function createRelay({
   trustProxy = process.env.FABRIC_TRUST_PROXY === '1',
   limits = defaultLimits(),
   queueBytes = queueBytesFromEnv(),
+  registerPowBits = powBitsFromEnv(),
   heartbeatMs = HEARTBEAT_MS,
   phone = phoneFromEnv(),
   links = linksFromEnv(),
@@ -639,7 +649,7 @@ export async function createRelay({
       }
       return mailbox;
     };
-    send(ws, { type: 'hello', relayKey: publicOnly(relayIdentity.publicJwk), nonce });
+    send(ws, { type: 'hello', relayKey: publicOnly(relayIdentity.publicJwk), nonce, ...(registerPowBits ? { powBits: registerPowBits } : {}) });
 
     const deliverQueued = () => {
       for (const env of store.queued(me.addr)) send(ws, { type: 'deliver', envelope: env });
@@ -775,6 +785,12 @@ export async function createRelay({
         // with FABRIC_CID_REQUIRED=1 a new address needs a CID that has none yet (sybil resistance)
         const needsCid = !existing && cidSvc && cid.required;
         if (needsCid && (!cidProof || store.cidHandle(cidProof.key))) return fail('Sign in with Cumulus://ID first.');
+        // otherwise a new address costs a little work (shared/pow.js), unless a CID that has none yet backs it
+        const cidBacked = Boolean(cidSvc && cidProof && !store.cidHandle(cidProof.key));
+        if (!existing && registerPowBits && !cidBacked
+          && !(await checkPow({ nonce, handle, counter: msg.pow, bits: registerPowBits }))) {
+          return fail('proof of work needed', { powBits: registerPowBits });
+        }
         let expected;
         try { expected = await ownershipProof(relayIdentity.privateJwk, dev.dh, nonce); } catch { return fail('bad key'); }
         if (typeof proof !== 'string' || !timingSafeEqualB64(proof, expected)) return fail('proof failed');

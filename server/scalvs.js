@@ -19,6 +19,7 @@ import { SessionManager, emptyStore } from '../shared/session.js';
 import { peekSealed, openSealed, isDeliveryKey } from '../shared/sealed.js';
 import { receiptPayload } from '../shared/chat.js';
 import { runTask } from './scalvs-tasks.js';
+import { solvePow } from '../shared/pow.js';
 
 export const SCALVS_HANDLE = '@scalvs.veil';
 const SEEN_KEEP = 2000;
@@ -69,6 +70,12 @@ export async function createScalvs({ stateFile = null, ai = null, log = console.
   let ws = null;
   let stopped = false;
   let registered = false;
+  let hello = null; // this connection's hello (relay key, nonce, how much work a new address costs)
+  let powFor = null;
+  const registerNow = async (pow = undefined) => {
+    const proof = await ownershipProof(privateOf(state.device.keys.dh), hello.relayKey, hello.nonce);
+    wsSend({ type: 'register', handle: me.handle, deviceId: me.deviceId, list: state.list, proof, ...(pow ? { pow } : {}) });
+  };
   let deliveryKey = null;
   let refSeq = 0;
   const pending = new Map(); // ref -> { resolve, reject, timer }
@@ -229,8 +236,8 @@ export async function createScalvs({ stateFile = null, ai = null, log = console.
     }
     switch (m.type) {
       case 'hello': {
-        const proof = await ownershipProof(privateOf(state.device.keys.dh), m.relayKey, m.nonce);
-        return wsSend({ type: 'register', handle: me.handle, deviceId: me.deviceId, list: state.list, proof });
+        hello = m;
+        return registerNow();
       }
       case 'registered':
         registered = true;
@@ -250,6 +257,14 @@ export async function createScalvs({ stateFile = null, ai = null, log = console.
         work = work.then(() => onDeliver(m.envelope)).catch((e) => log(`[scalvs] ${e.message}`));
         return;
       case 'error':
+        // a new address costs a little work (shared/pow.js): once per connection
+        if (!registered && m.error === 'proof of work needed' && Number.isInteger(m.powBits) && powFor !== hello) {
+          powFor = hello;
+          const here = hello;
+          const pow = await solvePow({ nonce: here.nonce, handle: me.handle, bits: m.powBits });
+          if (hello === here) return registerNow(pow);
+          return;
+        }
         if (!registered) log(`[scalvs] relay refused sign-in: ${m.error}`);
         return;
       default:

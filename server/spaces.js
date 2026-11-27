@@ -4,6 +4,7 @@
 
 import { createHash, randomBytes } from 'node:crypto';
 import { isValidHandle } from '../shared/crypto.js';
+import { TIERS } from '../shared/tiers.js';
 import {
   SPACE_ID_RE, INVITE_RE, KINDS, TOPICS, REACTIONS, MAX_ADMINS, can, postBody, cleanName, cleanAbout, channelHandle,
 } from '../shared/spaces.js';
@@ -29,9 +30,14 @@ CREATE INDEX IF NOT EXISTS space_invites_sid ON space_invites (sid);
 CREATE TABLE IF NOT EXISTS space_posts (seq INTEGER PRIMARY KEY AUTOINCREMENT, sid TEXT NOT NULL, id TEXT NOT NULL UNIQUE, author TEXT NOT NULL,
   body TEXT NOT NULL, at INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, views INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS space_posts_sid ON space_posts (sid, seq);
+CREATE INDEX IF NOT EXISTS space_posts_author ON space_posts (author);
 CREATE TABLE IF NOT EXISTS space_reactions (seq INTEGER NOT NULL, handle TEXT NOT NULL, emoji TEXT NOT NULL, PRIMARY KEY (seq, handle));
 CREATE TABLE IF NOT EXISTS space_views (seq INTEGER NOT NULL, viewer TEXT NOT NULL, PRIMARY KEY (seq, viewer));
 `);
+  // databases made before the per-account storage cap: add the size column and fill it in once
+  if (!db.prepare('PRAGMA table_info(space_posts)').all().some((c) => c.name === 'bytes')) {
+    db.exec('ALTER TABLE space_posts ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0; UPDATE space_posts SET bytes = length(CAST(body AS BLOB)) WHERE deleted = 0;');
+  }
   const q = (sql) => db.prepare(sql);
   const space = (sid) => (SPACE_ID_RE.test(String(sid)) ? q('SELECT * FROM spaces WHERE id = ?').get(sid) : null);
   const roleOf = (sid, h) => q('SELECT role FROM space_members WHERE sid = ? AND handle = ?').get(sid, h)?.role || null;
@@ -258,7 +264,13 @@ CREATE TABLE IF NOT EXISTS space_views (seq INTEGER NOT NULL, viewer TEXT NOT NU
       if (!b) throw err(s.visibility === 'public' ? 'empty post' : `post too large for your plan or malformed (up to ${Math.round(entitlements(me).uploadBytes / 1048576)} MB)`, 413);
       if (s.visibility === 'private' && b.e !== s.epoch) throw err('stale key epoch', 409);
       if (q('SELECT 1 FROM space_posts WHERE id = ?').get(id)) throw err('duplicate post id', 409);
-      const r = q('INSERT INTO space_posts (sid, id, author, body, at) VALUES (?, ?, ?, ?, ?)').run(s.id, id, me, JSON.stringify(b), now());
+      const json = JSON.stringify(b);
+      const bytes = Buffer.byteLength(json);
+      // everything this account keeps in large groups and channels, against its plan
+      const cap = entitlements(me).storageBytes ?? TIERS.free.storageBytes;
+      const used = q('SELECT COALESCE(SUM(bytes), 0) AS n FROM space_posts WHERE author = ? AND deleted = 0').get(me).n;
+      if (used + bytes > cap) throw err(`storage full for your plan (${Math.round(cap / 1073741824)} GB of posts in large groups and channels); delete old posts to make room`, 413);
+      const r = q('INSERT INTO space_posts (sid, id, author, body, at, bytes) VALUES (?, ?, ?, ?, ?, ?)').run(s.id, id, me, json, now(), bytes);
       const p = q('SELECT * FROM space_posts WHERE seq = ?').get(Number(r.lastInsertRowid));
       push(membersOf(s.id), (h) => ({ type: 'space_post', post: postOut(p, h) }));
       return { post: postOut(p, me) };
@@ -278,7 +290,7 @@ CREATE TABLE IF NOT EXISTS space_views (seq INTEGER NOT NULL, viewer TEXT NOT NU
       const p = q('SELECT * FROM space_posts WHERE seq = ? AND sid = ?').get(Number(seq), s.id);
       if (!p) throw err('unknown post', 404);
       if (p.author !== me && !can(roleOf(s.id, me), 'delete_post', s.kind)) throw err('not allowed', 403);
-      q("UPDATE space_posts SET deleted = 1, body = '{}' WHERE seq = ?").run(p.seq);
+      q("UPDATE space_posts SET deleted = 1, body = '{}', bytes = 0 WHERE seq = ?").run(p.seq);
       q('DELETE FROM space_reactions WHERE seq = ?').run(p.seq);
       push(membersOf(s.id), { type: 'space_unpost', sid: s.id, seq: p.seq });
       return { deleted: p.seq };

@@ -468,6 +468,7 @@ Two plans, enforced by the relay (`shared/tiers.js`, `server/plus.js`):
 | | FabriC++ (free) | FabriC++ Plus |
 |---|---|---|
 | Post size in large groups and channels | 1 MB | 8 MB |
+| Storage for your posts there (all together; deleting a post frees its space) | 1 GB | 20 GB |
 | Devices on one account | 5 | 10 |
 | Members in a large group you own | 1,000 | 20,000 |
 | Channels you own | 10 | 100 |

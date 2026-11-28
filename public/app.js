@@ -9,6 +9,7 @@ import {
   linkConfirmCode, newLinkNonce, LINK_NONCE_RE,
 } from '/shared/devices.js';
 import { qrMatrix } from '/shared/qr.js';
+import { autoBackupState, AUTO_BACKUP_RETRY_MS } from '/shared/auto-backup.js';
 import { startHandleDisplay } from '/handle-display.js';
 import { linkChannelKey, sealJson, openJson, newRecoveryKey, parseRecoveryKey, sealBackup, openBackup } from '/shared/channel.js';
 import { Vault, MIN_PASSPHRASE } from '/shared/vault.js';
@@ -393,8 +394,10 @@ async function handle(msg) {
       return;
     case 'cid_status':
       cidState = msg;
-      if (!msg.linked && db.cid) { delete db.cid; persist(); }
-      return renderCid();
+      if (!msg.linked && (db.cid || db.cloudAuto)) { delete db.cid; delete db.cloudAuto; persist(); }
+      renderCid();
+      autoBackup().catch(() => {});
+      return;
     case 'prekey_count': {
       // keep the relay stocked with one-time prekeys and a current signed prekey
       const up = await sessions?.maintainPreKeys(msg.hasSpk ? msg.count : 0, { forceSpk: !msg.hasSpk });
@@ -2991,7 +2994,7 @@ async function makeBackup() {
     $('backup-key').textContent = recovery;
     $('backup-result').classList.remove('hidden');
   }
-  return { file, reused: Boolean(typed) };
+  return { file, reused: Boolean(typed), recovery };
 }
 
 $('backup-form').onsubmit = async (e) => {
@@ -3177,11 +3180,12 @@ function renderCid() {
   const on = Boolean(cidState?.enabled ?? cidCfg.enabled);
   $('cid-card').classList.toggle('hidden', !on);
   $('backup-cloud').classList.toggle('hidden', !(on && cidState?.linked));
+  renderAutoBackup(on && cidState?.linked);
   if (!on) return;
   const rows = [['Status', cidState?.linked
     ? `Linked${db.cid ? ` as ${who(db.cid)}` : ''} since ${new Date(cidState.linkedAt).toLocaleDateString()}`
     : 'Not linked']];
-  if (cidState?.linked) rows.push(['Backup in Cumulus', cidState.backup ? `Saved ${new Date(cidState.backup.updatedAt).toLocaleString()} · ${fmtSize(cidState.backup.size)}` : 'None yet: use Save to Cumulus under Backup']);
+  if (cidState?.linked) rows.push(['Backup in Cumulus', cidState.backup ? `Saved ${new Date(cidState.backup.updatedAt).toLocaleString()} · ${fmtSize(cidState.backup.size)}${db.cloudAuto ? ' · kept up to date daily' : ''}` : 'None yet: use Save to Cumulus under Backup']);
   if (cidState?.required) rows.push(['New addresses', 'This relay asks every new address to have a Cumulus://ID']);
   const tb = $('cid-status');
   tb.replaceChildren();
@@ -3209,7 +3213,7 @@ $('cid-unlink').onclick = async () => {
   msg.className = 'small'; msg.textContent = '';
   try {
     await request({ type: 'cid_unlink' });
-    delete db.cid; persist();
+    delete db.cid; delete db.cloudAuto; persist();
     msg.textContent = 'Unlinked. The backup in Cumulus is deleted.';
   } catch (err) { msg.className = 'error small'; msg.textContent = err.message; }
 };
@@ -3220,21 +3224,87 @@ $('backup-cloud').onclick = async () => {
   msg.className = 'small'; msg.textContent = '';
   btn.disabled = true;
   try {
-    const { ticket, maxBytes } = await request({ type: 'cid_backup_ticket' });
-    const { file, reused } = await makeBackup();
-    const body = JSON.stringify(file);
-    if (body.length > maxBytes) throw new Error(`The backup is ${fmtSize(body.length)}, more than Cumulus takes here (${fmtSize(maxBytes)}). Download a backup file instead.`);
-    const res = await fetch(`/api/cid/backup?ticket=${encodeURIComponent(ticket)}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body });
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Upload failed.');
-    msg.textContent = reused
+    // read now: a status update during the upload redraws the switch
+    const keep = $('backup-auto').checked && !$('backup-auto').disabled;
+    const { file, reused, recovery } = await makeBackup();
+    await uploadToCumulus(file);
+    // "Keep it up to date": this device keeps the key, inside its encrypted vault, to seal the daily copy
+    autoWanted = false;
+    if (keep) db.cloudAuto = { key: recovery, at: Date.now() };
+    else delete db.cloudAuto;
+    persist();
+    renderCid();
+    msg.textContent = (reused
       ? 'Saved to Cumulus. It opens with the recovery key you entered.'
-      : 'Saved to Cumulus. It opens only with the recovery key shown here: older recovery keys no longer open the copy in Cumulus.';
+      : 'Saved to Cumulus. It opens only with the recovery key shown here: older recovery keys no longer open the copy in Cumulus.')
+      + (db.cloudAuto ? ' This device keeps that key to save the copy again once a day.' : '');
   } catch (err) {
     msg.className = 'error small'; msg.textContent = err.message;
   } finally {
     btn.disabled = false;
   }
 };
+
+/** Put one sealed backup file into Cumulus (through the relay, with a one-use ticket). */
+async function uploadToCumulus(file) {
+  const { ticket, maxBytes } = await request({ type: 'cid_backup_ticket' });
+  const body = JSON.stringify(file);
+  if (body.length > maxBytes) throw new Error(`The backup is ${fmtSize(body.length)}, more than Cumulus takes here (${fmtSize(maxBytes)}). Download a backup file instead.`);
+  const res = await fetch(`/api/cid/backup?ticket=${encodeURIComponent(ticket)}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Upload failed.');
+}
+
+// ---------- keeping the Cumulus copy up to date (shared/auto-backup.js) ----------
+let vaultHasPass = false; // read in renderAutoBackup; the account key never leaves silently behind a passphrase
+let autoWanted = false; // ticked, waiting for the next Save to Cumulus
+async function renderAutoBackup(linked) {
+  vaultHasPass = (await vault.meta())?.mode === 'passphrase';
+  const box = $('backup-auto');
+  $('backup-auto-row').classList.toggle('hidden', !linked || !db.primary);
+  box.disabled = vaultHasPass;
+  box.checked = (Boolean(db.cloudAuto) || autoWanted) && !vaultHasPass;
+  const note = $('backup-auto-note');
+  const text = !linked ? ''
+    : vaultHasPass ? 'Not available while this device asks for a passphrase: the account key only leaves after you type it.'
+      : db.cloudAuto?.error ? `The last automatic save failed (${db.cloudAuto.error}). It is tried again within an hour.`
+        : db.cloudAuto ? `Kept up to date automatically. Last copy: ${new Date(db.cloudAuto.at).toLocaleString()}.`
+          : '';
+  note.textContent = text;
+  note.classList.toggle('hidden', !text);
+}
+
+$('backup-auto').onchange = () => {
+  // turning it on takes effect with the next Save to Cumulus (that is when the key is chosen)
+  autoWanted = $('backup-auto').checked && !db.cloudAuto;
+  if (!$('backup-auto').checked && db.cloudAuto) { delete db.cloudAuto; persist(); renderCid(); }
+  else if (autoWanted) $('backup-msg').textContent = 'Now press Save to Cumulus. This device then saves the copy again once a day.';
+};
+
+let autoBackupRunning = false;
+async function autoBackup() {
+  if (autoBackupRunning || !db?.cloudAuto) return;
+  const state = autoBackupState({
+    auto: db.cloudAuto, primary: db.primary, linked: Boolean(cidState?.linked),
+    passphrase: (await vault.meta())?.mode === 'passphrase', online: registered,
+  });
+  if (state !== 'due') return;
+  autoBackupRunning = true;
+  const auto = db.cloudAuto;
+  auto.tried = Date.now();
+  try {
+    const accountKey = await vault.exportIdentityPart('account', null);
+    const file = await sealBackup(auto.key, { v: 3, handle: db.handle, account: accountKey, ...portableState({ media: true }) });
+    await uploadToCumulus(file);
+    if (db.cloudAuto === auto) { auto.at = Date.now(); delete auto.error; }
+  } catch (err) {
+    if (db.cloudAuto === auto) auto.error = String(err.message || err).slice(0, 200);
+  } finally {
+    autoBackupRunning = false;
+    persist();
+    renderCid();
+  }
+}
+setInterval(() => { autoBackup().catch(() => {}); }, AUTO_BACKUP_RETRY_MS / 4);
 
 fetch('/api/cid', { cache: 'no-store' }).then((r) => r.json()).then((c) => {
   cidCfg = { enabled: Boolean(c.enabled), required: Boolean(c.required) };

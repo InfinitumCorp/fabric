@@ -1009,6 +1009,13 @@ export default {
   "Your primary device should now show:": "Your primary device should now show:",
   "Yours, and join by address or link": "Yours, and join by address or link",
   "Zoom": "Zoom",
-  "App language. Messages you receive translate into it.": "App language. Messages you receive translate into it."
+  "App language. Messages you receive translate into it.": "App language. Messages you receive translate into it.",
+  "Keep the copy in Cumulus up to date (saved again once a day from this device)": "Keep the copy in Cumulus up to date (saved again once a day from this device)",
+  " This device keeps that key to save the copy again once a day.": " This device keeps that key to save the copy again once a day.",
+  "Not available while this device asks for a passphrase: the account key only leaves after you type it.": "Not available while this device asks for a passphrase: the account key only leaves after you type it.",
+  "The last automatic save failed ({0}). It is tried again within an hour.": "The last automatic save failed ({0}). It is tried again within an hour.",
+  "Kept up to date automatically. Last copy: {0}.": "Kept up to date automatically. Last copy: {0}.",
+  "Now press Save to Cumulus. This device then saves the copy again once a day.": "Now press Save to Cumulus. This device then saves the copy again once a day.",
+  " · kept up to date daily": " · kept up to date daily"
  }
 };

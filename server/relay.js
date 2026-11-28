@@ -49,6 +49,8 @@ import { createSpaces } from './spaces.js';
 import { createAds } from './ads.js';
 import { MAX_UPLOAD_BYTES, TIERS } from '../shared/tiers.js';
 import { checkPow, POW_MAX_BITS } from '../shared/pow.js';
+import { netblock, isLoopback } from './netblock.js';
+import { Buckets } from './limits.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MAX_ENVELOPE_BYTES = 512 * 1024; // link payloads carry a history snapshot
@@ -128,6 +130,14 @@ function powBitsFromEnv(env = process.env) {
   return n;
 }
 
+/** New addresses one network (/24 or /48) may make per day (FABRIC_NEW_ADDRESSES_PER_DAY, default 50; 0 = no cap). */
+function newAddressesFromEnv(env = process.env) {
+  if (env.FABRIC_NEW_ADDRESSES_PER_DAY === undefined || env.FABRIC_NEW_ADDRESSES_PER_DAY === '') return 50;
+  const n = Number(env.FABRIC_NEW_ADDRESSES_PER_DAY);
+  if (!Number.isInteger(n) || n < 0) throw new Error('FABRIC_NEW_ADDRESSES_PER_DAY must be a whole number, 0 for no cap');
+  return n;
+}
+
 function queueBytesFromEnv(env = process.env) {
   const mb = Number(env.FABRIC_QUEUE_MAX_MB);
   return Number.isFinite(mb) && mb > 0 ? Math.floor(mb * 1024 * 1024) : MAX_QUEUE_BYTES;
@@ -151,6 +161,7 @@ export async function createRelay({
   limits = defaultLimits(),
   queueBytes = queueBytesFromEnv(),
   accountQueueBytes = accountQueueBytesFromEnv(),
+  newAddressesPerDay = newAddressesFromEnv(),
   registerPowBits = powBitsFromEnv(),
   heartbeatMs = HEARTBEAT_MS,
   phone = phoneFromEnv(),
@@ -175,6 +186,8 @@ export async function createRelay({
   // plans, large groups and channels, sponsored posts (server/plus.js, spaces.js, ads.js)
   const plus = createPlus({ store, payments, log, now: clock, onChange: (h) => { for (const w of socketsOf(h)) send(w, plus.status(h)); } });
   const entitlements = (h) => plus.entitlements(h);
+  // sybil resistance: new addresses per network per day, refilled evenly (loopback is exempt)
+  const newAddressNet = newAddressesPerDay > 0 ? new Buckets(newAddressesPerDay, newAddressesPerDay / 86400) : null;
   /** Send to every online device of these accounts; `msg` may be a function of the handle. */
   const push = (handles, msg) => {
     const want = new Set(handles);
@@ -621,6 +634,7 @@ export async function createRelay({
       for (const [id, t] of tickets) if (t.expires < now) tickets.delete(id);
       cidSvc?.sweep();
       for (const b of Object.values(limits)) b.sweep();
+      newAddressNet?.sweep();
     }, 60_000),
     setInterval(() => {
       const dropped = store.expireQueues(Date.now() - QUEUE_TTL_MS);
@@ -802,6 +816,11 @@ export async function createRelay({
         let expected;
         try { expected = await ownershipProof(relayIdentity.privateJwk, dev.dh, nonce); } catch { return fail('bad key'); }
         if (typeof proof !== 'string' || !timingSafeEqualB64(proof, expected)) return fail('proof failed');
+        // checked last, so failed attempts don't use it up; a CID that has no address yet is scarce enough
+        if (!existing && !cidBacked && newAddressNet && !isLoopback(ip)) {
+          const wait = newAddressNet.take(netblock(ip));
+          if (wait) return fail('too many new addresses from this network today; try again later', { retryAfter: wait });
+        }
 
         if (!existing || payload.version > existing.payload.version) applyList(handle, list);
         if (!existing && cidProof && !store.cidHandle(cidProof.key)) store.linkCid(cidProof.key, handle);

@@ -1009,6 +1009,18 @@ export default {
   "Your primary device should now show:": "Your primary device should now show:",
   "Yours, and join by address or link": "Yours, and join by address or link",
   "Zoom": "Zoom",
-  "App language. Messages you receive translate into it.": "App language. Messages you receive translate into it."
+  "App language. Messages you receive translate into it.": "App language. Messages you receive translate into it.",
+  "Burner numbers": "Burner numbers",
+  "Burn all burner numbers": "Burn all burner numbers",
+  "If you lose this phone: an emergency burn code burns them all from any browser at": "If you lose this phone: an emergency burn code burns them all from any browser at",
+  "without signing in.": "without signing in.",
+  "Make an emergency burn code": "Make an emergency burn code",
+  "Make a new emergency burn code": "Make a new emergency burn code",
+  "Turn the code off": "Turn the code off",
+  "No burner numbers right now.": "No burner numbers right now.",
+  "An emergency burn code is set. Only the primary device can change it.": "An emergency burn code is set. Only the primary device can change it.",
+  "Only the primary device can make an emergency burn code.": "Only the primary device can make an emergency burn code.",
+  "Write this code down and keep it away from this phone. It is shown only once, works once, and replaces any earlier code. With your handle, it burns every burner number at /burn.html.": "Write this code down and keep it away from this phone. It is shown only once, works once, and replaces any earlier code. With your handle, it burns every burner number at /burn.html.",
+  "The emergency burn code is off.": "The emergency burn code is off."
  }
 };

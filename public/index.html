@@ -311,6 +311,15 @@
               <p id="phone-line-note" class="muted small"></p>
               <p id="phone-note" class="muted small" role="status"></p>
             </div>
+            <div id="burner-card" class="card hidden">
+              <h3>Burner numbers</h3>
+              <p id="burner-summary" class="muted small"></p>
+              <div class="row"><button id="burner-burn-all" class="danger" type="button">Burn all burner numbers</button></div>
+              <p class="muted small">If you lose this phone: an emergency burn code burns them all from any browser at <a id="burner-burn-link" href="/burn.html" target="_blank" rel="noopener">/burn.html</a>, without signing in.</p>
+              <div class="row"><button id="burner-code" class="ghost" type="button">Make an emergency burn code</button> <button id="burner-code-off" class="ghost hidden" type="button">Turn the code off</button></div>
+              <div id="burner-code-show" class="code-box hidden"><code id="burner-code-text"></code></div>
+              <p id="burner-code-note" class="muted small" role="status"></p>
+            </div>
             <div class="card wide">
               <h3>History</h3>
               <p id="phone-empty" class="muted small">No calls or texts yet.</p>

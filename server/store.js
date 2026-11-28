@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS burner_pool (number TEXT PRIMARY KEY, free_at INTEGER
 CREATE TABLE IF NOT EXISTS burner_lines (number TEXT PRIMARY KEY, handle TEXT NOT NULL, created_at INTEGER NOT NULL, rotated_from TEXT);
 CREATE INDEX IF NOT EXISTS burner_lines_handle ON burner_lines (handle);
 CREATE TABLE IF NOT EXISTS burner_bundles (id TEXT PRIMARY KEY, handle TEXT NOT NULL, size INTEGER NOT NULL, period TEXT NOT NULL, expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS burn_codes (handle TEXT PRIMARY KEY, hash TEXT NOT NULL, at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS burner_bundles_handle ON burner_bundles (handle);
 CREATE TABLE IF NOT EXISTS cid_links (key TEXT PRIMARY KEY, handle TEXT NOT NULL UNIQUE, linked_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS cloud_backups (handle TEXT PRIMARY KEY, blob TEXT NOT NULL, updated_at INTEGER NOT NULL);
@@ -345,6 +346,11 @@ export function openStore(file = null, { importJson = null } = {}) {
         ok = true;
       });
       return ok;
+    },
+    /** The account's emergency burn code: only its hash ('' when off) and when it was last set. */
+    burnCode: (handle) => db.prepare('SELECT hash, at FROM burn_codes WHERE handle = ?').get(String(handle)) || null,
+    setBurnCode(handle, hash, at) {
+      db.prepare('INSERT INTO burn_codes (handle, hash, at) VALUES (?, ?, ?) ON CONFLICT (handle) DO UPDATE SET hash = excluded.hash, at = excluded.at').run(String(handle), String(hash), at);
     },
     /** Accounts with more lines than their unexpired bundles allow (newest lines first). */
     excessLines(now = Date.now()) {

@@ -197,6 +197,11 @@ In the Phone tab, each one-tap action does one thing:
 - The **From** list on the dialer shows, and sets, which number each conversation uses. Someone who reached you on a
   burner gets answered from that burner.
 - Labels are only on your devices.
+- **Burn all burner numbers** burns every one at once, from any of your devices.
+- **Emergency burn code** (primary device only) is for a lost or taken phone. It is 32 letters and digits, shown once. With your handle, it burns every burner number from any browser at `/burn.html`, without signing in.
+  - The relay keeps only a hash of the code. It accepts that hash only in a message signed by the account key, so a linked device or a stolen session can't set a code of its own.
+  - The code works once. A wrong handle and a wrong code get the same answer.
+  - Tries are limited to 5 an hour per address and 10 a day per account.
 
 When a bundle runs out, the relay burns the lines it no longer covers.
 
@@ -672,7 +677,7 @@ Current status and the open question about this branch versus the Matrix build o
 5. **Transports**: ÆTHER mesh (burner records are already compatible: `aether-mesh` numbers), Spectre CRM logging (opt-in), E(O)N voice.
 6. **Buyer side**: approved-buyer licensing, aggregation with k-anonymity or differential privacy before any sale.
 7. **Relay scale & privacy**: stronger sybil resistance than the registration work and `FABRIC_CID_REQUIRED` already give, several relay processes sharing one database (Postgres), and per-account storage quotas.
-8. **Burner numbers, further**: real checkout and billing (Stripe or the Infinitum plan) wired to `/api/phone/bundles`, buying pool numbers from Twilio automatically when the pool runs low, a signed remote "burn all" for a lost device, and numbers outside +1.
+8. **Burner numbers, further**: real checkout and billing (Stripe or the Infinitum plan) wired to `/api/phone/bundles`, buying pool numbers from Twilio automatically when the pool runs low, and numbers outside +1.
 
 ## Repository layout: two client lines
 

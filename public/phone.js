@@ -2,6 +2,7 @@
 // Not end-to-end encrypted (the phone network can't be); the UI says so next to every action.
 
 import { reconcile, lineFor } from '../shared/burner.js';
+import { newBurnCode, burnCodeHash, signBurnCode } from '../shared/burn-code.js';
 import { mountDialpad } from './dialpad.js';
 
 const $ = (id) => document.getElementById(id);
@@ -51,7 +52,7 @@ const time = (at) => new Date(at).toLocaleString([], { month: 'short', day: 'num
  * @param {{ get: () => { records: object[], byPeer: object }, save: () => void }} [o.vault]
  *   where burner records (shared/burner.js) and each conversation's number live: the encrypted vault
  */
-export function createPhone({ request, inCall = () => false, vault = null, openEvent = null, openAudio = null }) {
+export function createPhone({ request, inCall = () => false, vault = null, openEvent = null, openAudio = null, accountKey = () => null, handle = () => null }) {
   const local = { records: [], byPeer: {} };
   const book = () => { const b = vault?.get() || local; b.records ??= []; b.byPeer ??= {}; return b; };
   const save = () => vault?.save();
@@ -323,6 +324,53 @@ export function createPhone({ request, inCall = () => false, vault = null, openE
       : 'Ask the relay operator to assign you one of their numbers.';
     for (const id of ['phone-call', 'phone-sms']) $(id).disabled = !canPhone();
     renderFrom();
+    renderBurners();
+  }
+
+  // ---------- burner numbers: burn all, emergency burn code ----------
+  function renderBurners() {
+    const b = status?.burners;
+    $('burner-card').classList.toggle('hidden', !b);
+    if (!b) return;
+    const n = b.lines.length;
+    $('burner-summary').textContent = n ? `${n} burner number${n === 1 ? '' : 's'} on this account.` : 'No burner numbers right now.';
+    $('burner-burn-all').disabled = !n;
+    const primary = Boolean(accountKey());
+    $('burner-code').classList.toggle('hidden', !primary);
+    $('burner-code').textContent = b.burnCode ? 'Make a new emergency burn code' : 'Make an emergency burn code';
+    $('burner-code-off').classList.toggle('hidden', !primary || !b.burnCode);
+    if (!primary) $('burner-code-note').textContent = b.burnCode ? 'An emergency burn code is set. Only the primary device can change it.' : 'Only the primary device can make an emergency burn code.';
+  }
+
+  async function burnAll() {
+    const n = status?.burners?.lines.length || 0;
+    if (!n || !confirm(`Burn all ${n} burner number${n === 1 ? '' : 's'}? They stop working at once, their calls and texts are deleted from the relay, and you can't get them back.`)) return;
+    $('burner-burn-all').disabled = true;
+    try {
+      const r = await request({ type: 'burner_burn_all' });
+      onStatus(r);
+      $('burner-code-note').textContent = `Burned ${r.burned} number${r.burned === 1 ? '' : 's'}.`;
+    } catch (e) {
+      $('burner-code-note').textContent = `Could not burn them: ${e.message}`;
+      renderBurners();
+    }
+  }
+
+  async function setCode(on) {
+    const key = accountKey();
+    if (!key) return;
+    const code = on ? newBurnCode() : null;
+    try {
+      const signed = await signBurnCode(key, { handle: handle(), hash: on ? await burnCodeHash(code) : '' });
+      onStatus(await request({ type: 'burner_code_set', ...signed }));
+      $('burner-code-show').classList.toggle('hidden', !on);
+      $('burner-code-text').textContent = code || '';
+      $('burner-code-note').textContent = on
+        ? 'Write this code down and keep it away from this phone. It is shown only once, works once, and replaces any earlier code. With your handle, it burns every burner number at /burn.html.'
+        : 'The emergency burn code is off.';
+    } catch (e) {
+      $('burner-code-note').textContent = `Could not save the code: ${e.message}`;
+    }
   }
 
   // ---------- which number a conversation uses ----------
@@ -416,6 +464,9 @@ export function createPhone({ request, inCall = () => false, vault = null, openE
   $('phone-to').addEventListener('input', () => renderFrom());
   $('phone-from').onchange = (e) => chooseLine(e.target.value);
   $('phone-sms').onclick = () => sendText($('phone-to').value, $('phone-text').value);
+  $('burner-burn-all').onclick = () => burnAll();
+  $('burner-code').onclick = () => setCode(true);
+  $('burner-code-off').onclick = () => setCode(false);
   $('phone-answer').onclick = () => {
     if (!incoming) return;
     const call = incoming;

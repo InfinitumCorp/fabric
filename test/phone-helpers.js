@@ -54,7 +54,7 @@ export async function signIn(port, handle) {
   c.send({ type: 'register', handle, deviceId: dev.id, list, proof });
   const res = await c.next((m) => m.type === 'registered' || m.type === 'error');
   assert.equal(res.type, 'registered', res.error);
-  return Object.assign(c, { handle, deviceId: dev.id, dh: dev.keys.dh });
+  return Object.assign(c, { handle, deviceId: dev.id, dh: dev.keys.dh, account: acct });
 }
 
 /** Open a sealed phone row (or sealed voicemail audio) with the device that signed in. */

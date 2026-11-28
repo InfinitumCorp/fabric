@@ -536,6 +536,7 @@ existing `data/state-v3.json` is imported once and renamed to `.imported`.
 | `FABRIC_ORIGINS` | Comma-separated origins allowed to open a WebSocket. Default: the relay's own host. |
 | `FABRIC_TRUST_PROXY=1` | Take the client IP from `X-Forwarded-For` (only behind your own proxy). |
 | `FABRIC_REGISTER_POW_BITS` | Work a new address costs (`shared/pow.js`): leading zero bits of SHA-256 over the connection's nonce, the handle and a counter. Default 16 (about 65,000 hashes, under a second in a browser); 0 turns it off; at most 28. Signing in to an existing address, or registering with a Cumulus://ID that has no address yet, costs nothing. |
+| `FABRIC_NEW_ADDRESSES_PER_DAY` | How many new addresses one network may make per day (default 50, refilled evenly; `0` = no cap). Set it with mobile carrier NAT in mind: many phones can share one address. A network is an IPv4 /24 or an IPv6 /48, so moving across neighbouring addresses doesn't help. Signing back in, and new addresses backed by a Cumulus://ID that has none yet, don't count. Loopback is exempt, so behind a proxy it only works with `FABRIC_TRUST_PROXY=1`. Counts are in memory and reset when the relay restarts. |
 | `FABRIC_QUEUE_MAX_MB` | Most megabytes of undelivered envelopes kept for one device (default 100; also at most 1,000 envelopes). Past that, senders get `recipient queue full` until the device comes online and acknowledges. |
 | `FABRIC_ACCOUNT_QUEUE_MAX_MB` | Most megabytes of undelivered envelopes kept for all devices of one account together (default 250), so adding devices doesn't multiply the per-device cap. Past that, senders get `recipient queue full`. Settings → Storage on the relay shows each account what the relay keeps for it. |
 | `FABRIC_ICE_SERVERS` | STUN/TURN list for calls (see above). |
@@ -677,7 +678,7 @@ Current status and the open question about this branch versus the Matrix build o
 4. **$FAB on Solana**: SPL token, payouts to FIRM Wallet, settlement hashes anchored on Firmament.
 5. **Transports**: ÆTHER mesh (burner records are already compatible: `aether-mesh` numbers), Spectre CRM logging (opt-in), E(O)N voice.
 6. **Buyer side**: approved-buyer licensing, aggregation with k-anonymity or differential privacy before any sale.
-7. **Relay scale & privacy**: stronger sybil resistance than the registration work and `FABRIC_CID_REQUIRED` already give, and several relay processes sharing one database (Postgres). Per-account storage caps are built: posts in large groups and channels by plan, and envelopes waiting for all of an account's devices together (`FABRIC_ACCOUNT_QUEUE_MAX_MB`).
+7. **Relay scale & privacy**: stronger sybil resistance than the registration work, the per-network cap on new addresses and `FABRIC_CID_REQUIRED` already give, and several relay processes sharing one database (Postgres). Per-account storage caps are built: posts in large groups and channels by plan, and envelopes waiting for all of an account's devices together (`FABRIC_ACCOUNT_QUEUE_MAX_MB`).
 8. **Burner numbers, further**: real checkout and billing (Stripe or the Infinitum plan) wired to `/api/phone/bundles`, buying pool numbers from Twilio automatically when the pool runs low, and numbers outside +1.
 
 ## Repository layout: two client lines

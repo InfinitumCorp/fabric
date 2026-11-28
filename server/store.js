@@ -3,6 +3,7 @@
 // The relay stores only public keys, signed device lists, ciphertext envelopes, consent,
 // metadata counters, balances and the settlement ledger.
 
+import { callingCode } from '../shared/calling-code.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -310,7 +311,15 @@ export function openStore(file = null, { importJson = null } = {}) {
       const r = db.prepare('SELECT COUNT(*) AS total, SUM(free_at <= ?) AS free FROM burner_pool').get(now);
       return { total: Number(r.total), free: Number(r.free || 0), lent: Number(db.prepare('SELECT COUNT(*) AS n FROM burner_lines').get().n) };
     },
-    poolHasFree: (now = Date.now()) => Boolean(db.prepare('SELECT 1 FROM burner_pool WHERE free_at <= ? LIMIT 1').get(now)),
+    /** Whether a number is free to lend; `code` ('+44') narrows it to one country calling code. */
+    poolHasFree: (now = Date.now(), code = null) => Boolean(code
+      ? db.prepare('SELECT 1 FROM burner_pool WHERE free_at <= ? AND substr(number, 1, length(?)) = ? LIMIT 1').get(now, code, code)
+      : db.prepare('SELECT 1 FROM burner_pool WHERE free_at <= ? LIMIT 1').get(now)),
+    /** Calling codes with at least one free number, e.g. ['+1', '+44']. */
+    poolCodes(now = Date.now()) {
+      const codes = new Set(db.prepare('SELECT number FROM burner_pool WHERE free_at <= ?').all(now).map((r) => callingCode(r.number)).filter(Boolean));
+      return [...codes].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
+    },
     burnerLines: (handle) => db.prepare('SELECT number, created_at AS createdAt, rotated_from AS rotatedFrom FROM burner_lines WHERE handle = ? ORDER BY created_at, number').all(String(handle))
       .map((r) => ({ number: r.number, createdAt: r.createdAt, rotatedFrom: r.rotatedFrom || null })),
     ownsLine: (handle, number) => Boolean(db.prepare('SELECT 1 FROM burner_lines WHERE handle = ? AND number = ?').get(String(handle), String(number))),
@@ -320,11 +329,13 @@ export function openStore(file = null, { importJson = null } = {}) {
       db.prepare('INSERT INTO burner_bundles (id, handle, size, period, expires_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET size = excluded.size, period = excluded.period, expires_at = excluded.expires_at')
         .run(String(id), String(handle), size, period, expiresAt);
     },
-    /** Lends a free pool number to an account; null when the pool has none ready. */
-    takeLine(handle, now = Date.now(), rotatedFrom = null) {
+    /** Lends a free pool number to an account, from one calling code if `code` is set; null when none is ready. */
+    takeLine(handle, now = Date.now(), rotatedFrom = null, code = null) {
       let number = null;
       store.tx(() => {
-        const r = db.prepare('SELECT number FROM burner_pool WHERE free_at <= ? ORDER BY free_at, number LIMIT 1').get(now);
+        const r = code
+          ? db.prepare('SELECT number FROM burner_pool WHERE free_at <= ? AND substr(number, 1, length(?)) = ? ORDER BY free_at, number LIMIT 1').get(now, code, code)
+          : db.prepare('SELECT number FROM burner_pool WHERE free_at <= ? ORDER BY free_at, number LIMIT 1').get(now);
         if (!r) return;
         db.prepare('DELETE FROM burner_pool WHERE number = ?').run(r.number);
         db.prepare('INSERT INTO burner_lines (number, handle, created_at, rotated_from) VALUES (?, ?, ?, ?)').run(r.number, String(handle), now, rotatedFrom);

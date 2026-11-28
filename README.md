@@ -161,7 +161,7 @@ and missed calls go to voicemail. It runs through a Twilio account owned by the 
 | `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET` | signs browser access tokens, sends texts, fetches voicemail |
 | `TWILIO_TWIML_APP_SID` | the TwiML App from step 1 |
 | `FABRIC_PUBLIC_URL` | the relay's public URL exactly as Twilio calls it (used to check signatures) |
-| `FABRIC_PHONE_COUNTRIES` | optional, calling codes users may call and text (default `+1`) |
+| `FABRIC_PHONE_COUNTRIES` | optional, calling codes users may call and text (default `+1`). Premium-rate ranges are refused in every country the relay knows them for (US/Canada, UK, Germany, France, Italy, Spain, Australia, Russia). |
 | `FABRIC_PHONE_NUMBERS` | optional, `{"+15551234567":"@ana.veil"}` assigned at start |
 
 3. Assign numbers to accounts: `POST /api/phone/numbers {"number":"+15551234567","handle":"@ana.veil"}` with the
@@ -189,8 +189,8 @@ Disposable numbers that stand in for you on calls and texts: people you reach fr
 They're an add-on to the FabriC++ plan, in **bundles of 1, 2 or 5 numbers**, renewed monthly or yearly.
 
 In the Phone tab, each one-tap action does one thing:
-- **New burner number** takes one from the relay's pool.
-- **Rotate** swaps a burner for a fresh number in one step. The old one is burned, but only once a new one has been
+- **New burner number** takes one from the relay's pool. The pool can hold numbers from several countries; a device may ask for one country (`burner_create` with `country: "+44"`), and the status lists the calling codes that have a free number (`availableCodes`).
+- **Rotate** swaps a burner for a fresh number in one step, from the same country unless the device asks for another. The old one is burned, but only once a new one has been
   found; conversations that used it move to the new one.
 - **Burn** drops it for good after a 5-second Undo. It stops ringing at once, the relay deletes its calls and texts,
   and the number rests in the pool (90 days by default) so its callers don't reach the next person.
@@ -677,7 +677,7 @@ Current status and the open question about this branch versus the Matrix build o
 5. **Transports**: ÆTHER mesh (burner records are already compatible: `aether-mesh` numbers), Spectre CRM logging (opt-in), E(O)N voice.
 6. **Buyer side**: approved-buyer licensing, aggregation with k-anonymity or differential privacy before any sale.
 7. **Relay scale & privacy**: stronger sybil resistance than the registration work and `FABRIC_CID_REQUIRED` already give, several relay processes sharing one database (Postgres), and per-account storage quotas.
-8. **Burner numbers, further**: real checkout and billing (Stripe or the Infinitum plan) wired to `/api/phone/bundles`, buying pool numbers from Twilio automatically when the pool runs low, and numbers outside +1.
+8. **Burner numbers, further**: real checkout and billing (Stripe or the Infinitum plan) wired to `/api/phone/bundles`, and buying pool numbers from Twilio automatically when the pool runs low. Numbers outside +1 are built: pools by country, picked per burner.
 
 ## Repository layout: two client lines
 

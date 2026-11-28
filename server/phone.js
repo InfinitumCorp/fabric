@@ -25,6 +25,7 @@
 // Each purchased number's Voice URL is {FABRIC_PUBLIC_URL}/api/phone/incoming and its Messaging
 // URL is {FABRIC_PUBLIC_URL}/api/phone/sms (both HTTP POST).
 
+import { callingCode, CALLING_CODE_RE } from '../shared/calling-code.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { isPublicJwk, isValidHandle } from '../shared/crypto.js';
 import { DEVICE_ID_RE } from '../shared/devices.js';
@@ -106,9 +107,14 @@ export const handleOfIdentity = (id) => {
   return isValidHandle(h) ? h : null;
 };
 
+// Premium-rate and shared-cost ranges in the countries a relay is likely to allow, so a hijacked
+// account can't run up charges: US/Canada 900 and 976, UK 09 and 087x, Germany 0900 and 0137,
+// France 089x, Italy 89x, Spain 80x and 90x, Australia 190x, Russia 809.
+const PREMIUM_RE = /^\+(1(900|976)|44(9|87)|49(900|137)|33(89)|39(89)|34(80[3-7]|90[57])|61(19)|7(809))/;
+
 export function dialable(number, countries) {
   if (!E164_RE.test(number)) return false;
-  if (/^\+1(900|976)/.test(number)) return false; // premium-rate lines
+  if (PREMIUM_RE.test(number)) return false; // premium-rate lines
   return countries.some((p) => number.startsWith(p));
 }
 
@@ -143,7 +149,7 @@ export function createPhone({ cfg, store, notify, log = console.log, fetchImpl =
       ...(burnerCfg.enabled ? {
         burners: {
           lines: store.burnerLines(handle), slots: store.burnerSlots(handle), bundles: store.burnerBundles(handle), burnCode: Boolean(store.burnCode(handle)?.hash),
-          available: store.poolHasFree(), checkoutUrl: burnerCfg.checkoutUrl, bundleSizes: BUNDLES,
+          available: store.poolHasFree(), availableCodes: store.poolCodes(), checkoutUrl: burnerCfg.checkoutUrl, bundleSizes: BUNDLES,
         },
       } : {}),
     };
@@ -386,9 +392,12 @@ export function createPhone({ cfg, store, notify, log = console.log, fetchImpl =
       case 'burner_create': {
         if (!burnerCfg.enabled) return fail('burner numbers are not available');
         if (store.burnerLines(me.handle).length >= store.burnerSlots(me.handle)) return fail('no free burner slots: add a bundle first');
-        if (!store.poolHasFree()) return fail('no numbers are free right now; try again later');
+        // optional `country`: a calling code ('+44') to take the number from
+        const code = msg.country == null || msg.country === '' ? null : String(msg.country);
+        if (code && !CALLING_CODE_RE.test(code)) return fail('bad country code');
+        if (!store.poolHasFree(Date.now(), code)) return fail(code ? `no numbers are free right now from ${code}; try another country or later` : 'no numbers are free right now; try again later');
         if (buckets.burner.take(me.handle)) return fail('too many new numbers today');
-        const number = store.takeLine(me.handle);
+        const number = store.takeLine(me.handle, Date.now(), null, code);
         if (!number) return fail('no numbers are free right now; try again later');
         pushStatus(me.handle);
         return reply({ ...status(me.handle), type: 'burner_created', line: number });
@@ -422,11 +431,14 @@ export function createPhone({ cfg, store, notify, log = console.log, fetchImpl =
         // a fresh number in place of this one, in one step: the old one only goes if a new one comes
         const old = String(msg.number || '');
         if (!store.ownsLine(me.handle, old)) return fail('that number is not one of your burners');
-        if (!store.poolHasFree()) return fail('no numbers are free right now; try again later');
+        // the new number comes from the same country as the old one, unless `country` says otherwise
+        const code = msg.country ? String(msg.country) : callingCode(old);
+        if (code && !CALLING_CODE_RE.test(code)) return fail('bad country code');
+        if (!store.poolHasFree(Date.now(), code)) return fail(`no numbers are free right now from ${code}; try again later`);
         if (buckets.burner.take(me.handle)) return fail('too many new numbers today');
         let number = null;
         store.tx(() => {
-          number = store.takeLine(me.handle, Date.now(), old);
+          number = store.takeLine(me.handle, Date.now(), old, code);
           if (number) burnNow(me.handle, old);
         });
         if (!number) return fail('no numbers are free right now; try again later');

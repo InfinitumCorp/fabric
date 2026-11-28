@@ -369,6 +369,8 @@ async function handle(msg) {
         request,
         inCall: () => Boolean(calls?.active),
         vault: { get: () => (db.burners ??= { records: [], byPeer: {} }), save: () => persist() },
+        accountKey: () => (db.primary ? identity?.account?.privateKey || null : null),
+        handle: () => db.handle,
         openEvent: (view) => openSeal({ box: view.box, handle: db.handle, seq: view.seq, deviceId: db.deviceId, privateKey: privateOf(identity.dh) }),
         openAudio: (view) => openSeal({
           box: view.box, handle: db.handle, seq: view.seq, deviceId: db.deviceId, privateKey: privateOf(identity.dh),

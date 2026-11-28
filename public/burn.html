@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <title>FabriC++™ · Burn all burner numbers</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="screen">
+    <div class="card onboard-card">
+      <p class="eyebrow">Product / Communications · Infinitum Corporation</p>
+      <div class="brand">FabriC++<sup>™</sup></div>
+      <p class="tag">Burn all burner numbers</p>
+      <p class="muted small">Lost your phone? Enter your handle and the emergency burn code you wrote down. Every burner number on the account stops working at once and its calls and texts are deleted from the relay. You can't undo this, and the code works only once.</p>
+      <form id="burn-form" autocomplete="off">
+        <label class="field"><span>Handle</span><input id="burn-handle" placeholder="+name.veil" required autocapitalize="none" spellcheck="false" /></label>
+        <label class="field"><span>Emergency burn code</span><input id="burn-code" class="mono" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX" required autocapitalize="characters" spellcheck="false" /></label>
+        <div class="row"><button id="burn-go" class="danger" type="submit">Burn them all</button></div>
+      </form>
+      <p id="burn-msg" class="muted small" role="status"></p>
+      <p class="muted small">Your main number and your chats are not touched. To cut off the lost phone itself, remove it under Settings → Devices on another device, or restore from your backup.</p>
+    </div>
+  </div>
+  <script type="module" src="/burn.js"></script>
+</body>
+</html>

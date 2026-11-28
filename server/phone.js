@@ -31,6 +31,7 @@ import { DEVICE_ID_RE } from '../shared/devices.js';
 import { isPhoneBox, sealToDevices } from '../shared/sealbox.js';
 import { Buckets } from './limits.js';
 import { BUNDLES } from '../shared/burner.js';
+import { burnCodeHash, checkBurnCode } from '../shared/burn-code.js';
 
 export const E164_RE = /^\+[1-9]\d{6,14}$/;
 export const PHONE_LOG_TTL_MS = 30 * 24 * 3600 * 1000;
@@ -131,6 +132,8 @@ export function createPhone({ cfg, store, notify, log = console.log, fetchImpl =
     sms: new Buckets(20, 60 / 3600),        // texts per account
     fetchVm: new Buckets(10, 30 / 60),
     burner: new Buckets(6, 12 / 86400),      // new burner numbers per account: 6 at once, 12 a day
+    burnIp: new Buckets(5, 5 / 3600),         // emergency burn attempts per address: 5 at once, 5 an hour
+    burnHandle: new Buckets(10, 10 / 86400), // and per account: 10 a day, so the code can't be guessed online
   };
 
   /** What a device needs to show: main number, burner lines and bundles, and what's on offer. */
@@ -139,7 +142,7 @@ export function createPhone({ cfg, store, notify, log = console.log, fetchImpl =
       type: 'phone_status', enabled: true, number: store.numberOf(handle), countries: cfg.countries,
       ...(burnerCfg.enabled ? {
         burners: {
-          lines: store.burnerLines(handle), slots: store.burnerSlots(handle), bundles: store.burnerBundles(handle),
+          lines: store.burnerLines(handle), slots: store.burnerSlots(handle), bundles: store.burnerBundles(handle), burnCode: Boolean(store.burnCode(handle)?.hash),
           available: store.poolHasFree(), checkoutUrl: burnerCfg.checkoutUrl, bundleSizes: BUNDLES,
         },
       } : {}),
@@ -150,6 +153,12 @@ export function createPhone({ cfg, store, notify, log = console.log, fetchImpl =
   const fromNumber = (handle, via) => (via ? (burnerCfg.enabled && store.ownsLine(handle, via) ? via : null) : store.numberOf(handle));
   const canCall = (handle) => Boolean(store.numberOf(handle) || (burnerCfg.enabled && store.burnerLines(handle).length));
   const burnNow = (handle, number) => store.burnLine(handle, number, Date.now() + burnerCfg.cooldownMs);
+  /** Burns every burner line of an account. Returns how many went. */
+  const burnAll = (handle) => {
+    let n = 0;
+    store.tx(() => { for (const { number } of store.burnerLines(handle)) if (burnNow(handle, number)) n++; });
+    return n;
+  };
   const auth = 'Basic ' + Buffer.from(`${cfg.apiKey}:${cfg.apiSecret}`).toString('base64');
 
   function deviceKeys(handle) {
@@ -202,6 +211,7 @@ export function createPhone({ cfg, store, notify, log = console.log, fetchImpl =
 
   /** Returns true if it handled the request. */
   async function http(req, res, url) {
+    if (url.pathname === '/api/phone/burn-all') { await burnAllHttp(req, res); return true; }
     if (!ROUTES.has(url.pathname)) return false;
     const xml = (body, code = 200) => { res.writeHead(code, { 'content-type': 'text/xml', 'cache-control': 'no-store' }); res.end(body); };
     if (req.method !== 'POST') { xml(twiml(), 405); return true; }
@@ -214,6 +224,36 @@ export function createPhone({ cfg, store, notify, log = console.log, fetchImpl =
     }
     xml(await webhook(url, params));
     return true;
+  }
+
+  /**
+   * Emergency burn from /burn.html: { handle, code }. No sign-in, so the answers say as little as
+   * they can: a wrong handle and a wrong code look the same.
+   */
+  async function burnAllHttp(req, res) {
+    const out = (code, body) => { res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
+    if (req.method !== 'POST') return out(405, { error: 'POST only' });
+    if (!burnerCfg.enabled) return out(404, { error: 'burner numbers are off' });
+    if (buckets.burnIp.take(req.socket?.remoteAddress || '?')) return out(429, { error: 'too many tries: wait an hour' });
+    let body;
+    try {
+      let raw = '';
+      for await (const chunk of req) { raw += chunk; if (raw.length > 2048) return out(413, { error: 'body too large' }); }
+      body = JSON.parse(raw);
+    } catch { return out(400, { error: 'send JSON: {"handle", "code"}' }); }
+    const handle = String(body?.handle || '').trim().toLowerCase();
+    let h = handle.replace(/^[+@]?/, '@'); if (!h.includes('.')) h += '.veil';
+    let hash;
+    try { hash = await burnCodeHash(String(body?.code || '')); } catch (e) { return out(400, { error: e.message }); }
+    if (!isValidHandle(h) || buckets.burnHandle.take(h)) return out(403, { error: 'that handle and code do not match' });
+    const saved = store.burnCode(h);
+    const a = Buffer.from(saved?.hash || ''); const b = Buffer.from(hash);
+    if (!saved?.hash || a.length !== b.length || !timingSafeEqual(a, b)) return out(403, { error: 'that handle and code do not match' });
+    store.setBurnCode(h, '', Date.now()); // one use
+    const burned = burnAll(h);
+    log(`[phone] emergency burn for ${h}: ${burned} burner number(s)`);
+    pushStatus(h);
+    return out(200, { burned });
   }
 
   async function webhook(url, p) {
@@ -359,6 +399,23 @@ export function createPhone({ cfg, store, notify, log = console.log, fetchImpl =
         if (!burnNow(me.handle, number)) return fail('that number is not one of your burners');
         pushStatus(me.handle);
         return reply({ ...status(me.handle), type: 'burner_burned', line: number });
+      }
+      case 'burner_burn_all': {
+        if (!burnerCfg.enabled) return fail('burner numbers are not available');
+        const burned = burnAll(me.handle);
+        pushStatus(me.handle);
+        return reply({ ...status(me.handle), type: 'burner_burned_all', burned });
+      }
+      case 'burner_code_set': {
+        // only the account key (the primary device) sets or clears the emergency code
+        if (!burnerCfg.enabled) return fail('burner numbers are not available');
+        const account = store.getList(me.handle)?.payload?.account;
+        if (!account) return fail('no device list');
+        const why = await checkBurnCode(account, msg, { handle: me.handle, lastAt: store.burnCode(me.handle)?.at || 0 });
+        if (why) return fail(why);
+        store.setBurnCode(me.handle, msg.hash, msg.at);
+        pushStatus(me.handle);
+        return reply({ ...status(me.handle), type: 'burner_code_saved' });
       }
       case 'burner_rotate': {
         if (!burnerCfg.enabled) return fail('burner numbers are not available');

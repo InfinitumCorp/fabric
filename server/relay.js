@@ -55,6 +55,8 @@ const MAX_ENVELOPE_BYTES = 512 * 1024; // link payloads carry a history snapshot
 const MAX_QUEUE = 1000;
 // total size of the envelopes waiting for one device (FABRIC_QUEUE_MAX_MB); 1000 full envelopes would be ~500 MB
 const MAX_QUEUE_BYTES = 100 * 1024 * 1024;
+// the same, for all devices of one account together (FABRIC_ACCOUNT_QUEUE_MAX_MB)
+const MAX_ACCOUNT_QUEUE_BYTES = 250 * 1024 * 1024;
 const MAX_OPKS = 200;
 const MAILBOX_TTL_MS = 10 * 60 * 1000;
 const QUEUE_TTL_MS = 30 * 24 * 3600 * 1000;
@@ -131,6 +133,11 @@ function queueBytesFromEnv(env = process.env) {
   return Number.isFinite(mb) && mb > 0 ? Math.floor(mb * 1024 * 1024) : MAX_QUEUE_BYTES;
 }
 
+function accountQueueBytesFromEnv(env = process.env) {
+  const mb = Number(env.FABRIC_ACCOUNT_QUEUE_MAX_MB);
+  return Number.isFinite(mb) && mb > 0 ? Math.floor(mb * 1024 * 1024) : MAX_ACCOUNT_QUEUE_BYTES;
+}
+
 export async function createRelay({
   port = 8787,
   dataFile = process.env.FABRIC_DB || path.join(ROOT, 'data', 'fabric.db'),
@@ -143,6 +150,7 @@ export async function createRelay({
   trustProxy = process.env.FABRIC_TRUST_PROXY === '1',
   limits = defaultLimits(),
   queueBytes = queueBytesFromEnv(),
+  accountQueueBytes = accountQueueBytesFromEnv(),
   registerPowBits = powBitsFromEnv(),
   heartbeatMs = HEARTBEAT_MS,
   phone = phoneFromEnv(),
@@ -670,8 +678,8 @@ export async function createRelay({
       if (limited(limits.sealedTarget, addr, 1, { ref: msg.ref })) return;
       // no sender fields; the relay's own clock instead of the sender's
       const envelope = { id, ts: Date.now(), sealed: { v: 1, ek: publicOnly(sealed.ek), iv: sealed.iv, ct: sealed.ct } };
-      const outcome = store.enqueue(addr, envelope, MAX_QUEUE, { maxBytes: queueBytes });
-      if (outcome === 'full') return fail('recipient queue full');
+      const outcome = store.enqueue(addr, envelope, MAX_QUEUE, { maxBytes: queueBytes, accountMaxBytes: accountQueueBytes });
+      if (outcome === 'full' || outcome === 'account full') return fail('recipient queue full');
       const target = online.get(addr);
       if (outcome === 'queued' && target) send(target, { type: 'deliver', envelope });
       return send(ws, { type: 'sealed_ack', ref: msg.ref, queued: !target });
@@ -832,8 +840,8 @@ export async function createRelay({
           };
           const addr = deviceAddr(e.to, e.toDevice);
           // stored (and committed) before anything is acknowledged; removed when the device acks it
-          const outcome = store.enqueue(addr, envelope, MAX_QUEUE, { maxBytes: queueBytes });
-          if (outcome === 'full') return send(ws, { type: 'error', error: 'recipient queue full', ...ref });
+          const outcome = store.enqueue(addr, envelope, MAX_QUEUE, { maxBytes: queueBytes, accountMaxBytes: accountQueueBytes });
+          if (outcome === 'full' || outcome === 'account full') return send(ws, { type: 'error', error: 'recipient queue full', ...ref });
           const target = online.get(addr);
           if (outcome === 'queued') {
             if (target) send(target, { type: 'deliver', envelope });
@@ -937,6 +945,18 @@ export async function createRelay({
           if (!cidSvc) return fail('Cumulus://ID is not set up on this relay');
           if (!store.cidOf(me.handle)) return fail('Link a Cumulus://ID first.');
           return send(ws, { type: 'cid_backup_ticket', ref: msg.ref, ticket: newTicket('up', me.handle), maxBytes: MAX_BACKUP_BYTES });
+        }
+        case 'storage': {
+          // what the relay keeps for this account, against each cap
+          if (limited(limits.misc, me.addr)) return;
+          const u = store.storageUsage(me.handle);
+          return send(ws, {
+            type: 'storage', ref: msg.ref,
+            waiting: { used: u.waiting, max: accountQueueBytes },
+            posts: { used: spaces.postBytes(me.handle), max: entitlements(me.handle).storageBytes ?? TIERS.free.storageBytes },
+            backup: { used: u.backup, max: MAX_BACKUP_BYTES },
+            voicemail: { used: u.voicemail },
+          });
         }
         case 'account':
           if (limited(limits.misc, me.addr)) return;

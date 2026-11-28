@@ -1021,6 +1021,13 @@ export default {
   "An emergency burn code is set. Only the primary device can change it.": "An emergency burn code is set. Only the primary device can change it.",
   "Only the primary device can make an emergency burn code.": "Only the primary device can make an emergency burn code.",
   "Write this code down and keep it away from this phone. It is shown only once, works once, and replaces any earlier code. With your handle, it burns every burner number at /burn.html.": "Write this code down and keep it away from this phone. It is shown only once, works once, and replaces any earlier code. With your handle, it burns every burner number at /burn.html.",
-  "The emergency burn code is off.": "The emergency burn code is off."
+  "The emergency burn code is off.": "The emergency burn code is off.",
+  "Storage on the relay": "Storage on the relay",
+  "What this relay keeps for your account. Messages waiting for a device that is offline count until that device picks them up. They are end-to-end encrypted, so the relay only knows their size.": "What this relay keeps for your account. Messages waiting for a device that is offline count until that device picks them up. They are end-to-end encrypted, so the relay only knows their size.",
+  "Waiting for your devices": "Waiting for your devices",
+  "Your posts in large groups and channels": "Your posts in large groups and channels",
+  "Cumulus backup": "Cumulus backup",
+  "Voicemail": "Voicemail",
+  "None": "None"
  }
 };

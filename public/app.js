@@ -405,6 +405,8 @@ async function handle(msg) {
       account = msg;
       renderEarn();
       return;
+    case 'storage':
+      return renderStorage(msg);
     case 'cid_status':
       cidState = msg;
       if (!msg.linked && db.cid) { delete db.cid; persist(); }
@@ -1969,8 +1971,10 @@ function svgIcon(d) {
   return svg;
 }
 
+let storageAskedAt = 0;
 function renderSettings() {
   if (!db?.handle) return;
+  if (Date.now() - storageAskedAt > 30_000) { storageAskedAt = Date.now(); wsSend({ type: 'storage' }); }
   $('settings-avatar').replaceWith(Object.assign(avatarEl(db.handle, 'avatar big'), { id: 'settings-avatar' }));
   const hasPhoto = Boolean(db.profile?.data);
   $('photo-pick').textContent = hasPhoto ? 'Change photo' : 'Add photo';
@@ -3187,6 +3191,17 @@ $('cid-restore').onclick = async () => {
     $('restore-error').textContent = err.message;
   }
 };
+
+/** Settings: what the relay keeps for this account (the `storage` op), each against its cap. */
+function renderStorage(u) {
+  const of = (x) => (x?.used ? (x.max ? `${fmtSize(x.used)} of ${fmtSize(x.max)}` : fmtSize(x.used)) : 'None');
+  const rows = [['Waiting for your devices', of(u.waiting)], ['Your posts in large groups and channels', of(u.posts)]];
+  if (u.backup?.used) rows.push(['Cumulus backup', of(u.backup)]);
+  if (u.voicemail?.used) rows.push(['Voicemail', of(u.voicemail)]);
+  const tb = $('storage-status');
+  tb.replaceChildren();
+  for (const [k, v] of rows) { const tr = el('tr'); tr.append(el('th', '', k), el('td', '', v)); tb.append(tr); }
+}
 
 function renderCid() {
   const on = Boolean(cidState?.enabled ?? cidCfg.enabled);

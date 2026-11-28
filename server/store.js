@@ -83,6 +83,8 @@ export function openStore(file = null, { importJson = null } = {}) {
     queueBytes: q('SELECT COALESCE(SUM(bytes), 0) AS n FROM queue WHERE addr = ?'),
     queuedId: q('SELECT 1 FROM queue WHERE addr = ? AND id = ?'),
     queueCount: q('SELECT COUNT(*) AS n FROM queue WHERE addr = ?'),
+    // every device of one account: addresses are `handle#device`, and '$' sorts right after '#'
+    accountQueueBytes: q("SELECT COALESCE(SUM(bytes), 0) AS n FROM queue WHERE addr >= ? || '#' AND addr < ? || '$'"),
     queued: q('SELECT envelope FROM queue WHERE addr = ? ORDER BY seq LIMIT ?'),
     ack: q('DELETE FROM queue WHERE addr = ? AND id = ?'),
     expire: q('DELETE FROM queue WHERE queued_at < ?'),
@@ -187,21 +189,38 @@ export function openStore(file = null, { importJson = null } = {}) {
     // ----- store-until-acknowledged delivery -----
     /**
      * Returns 'queued', 'duplicate' or 'full'. `max` caps the envelopes waiting for one device;
-     * `maxBytes` caps their total size, so one offline device cannot pin unbounded disk.
+     * `maxBytes` caps their total size, so one offline device cannot pin unbounded disk;
+     * `accountMaxBytes` caps the total for all devices of the account, so adding devices doesn't
+     * multiply it. Returns 'account full' when that one is hit.
      */
-    enqueue(addr, envelope, max, { maxBytes = Infinity, now = Date.now() } = {}) {
+    enqueue(addr, envelope, max, { maxBytes = Infinity, accountMaxBytes = Infinity, now = Date.now() } = {}) {
       const json = JSON.stringify(envelope);
       const bytes = Buffer.byteLength(json);
       return tx(() => {
         if (st.queuedId.get(addr, envelope.id)) return 'duplicate';
         if (st.queueCount.get(addr).n >= max) return 'full';
         if (st.queueBytes.get(addr).n + bytes > maxBytes) return 'full';
+        if (accountMaxBytes !== Infinity) {
+          const handle = addr.slice(0, addr.lastIndexOf('#'));
+          if (st.accountQueueBytes.get(handle, handle).n + bytes > accountMaxBytes) return 'account full';
+        }
         return st.enqueue.run(addr, envelope.id, json, now, bytes).changes ? 'queued' : 'duplicate';
       });
     },
     queued: (addr, limit = 1000) => st.queued.all(addr, limit).map((r) => JSON.parse(r.envelope)),
     queueCount: (addr) => st.queueCount.get(addr).n,
     queueBytes: (addr) => st.queueBytes.get(addr).n,
+    accountQueueBytes: (handle) => st.accountQueueBytes.get(String(handle), String(handle)).n,
+    /** What the relay holds for one account, in bytes (shown to the account's own devices). */
+    storageUsage(handle) {
+      const h = String(handle);
+      const one = (sql) => Number(db.prepare(sql).get(h)?.n || 0);
+      return {
+        waiting: store.accountQueueBytes(h),
+        backup: one('SELECT length(CAST(blob AS BLOB)) AS n FROM cloud_backups WHERE handle = ?'),
+        voicemail: one('SELECT COALESCE(SUM(length(CAST(box AS BLOB))), 0) AS n FROM phone_audio WHERE handle = ?'),
+      };
+    },
     ack: (addr, id) => st.ack.run(addr, id).changes,
     expireQueues: (before) => st.expire.run(before).changes,
 

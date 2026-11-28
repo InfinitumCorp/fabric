@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS space_views (seq INTEGER NOT NULL, viewer TEXT NOT NU
     db.exec('ALTER TABLE space_posts ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0; UPDATE space_posts SET bytes = length(CAST(body AS BLOB)) WHERE deleted = 0;');
   }
   const q = (sql) => db.prepare(sql);
+  /** Bytes of this account's live posts in large groups and channels (what the plan's storage covers). */
+  const postBytes = (handle) => q('SELECT COALESCE(SUM(bytes), 0) AS n FROM space_posts WHERE author = ? AND deleted = 0').get(String(handle)).n;
   const space = (sid) => (SPACE_ID_RE.test(String(sid)) ? q('SELECT * FROM spaces WHERE id = ?').get(sid) : null);
   const roleOf = (sid, h) => q('SELECT role FROM space_members WHERE sid = ? AND handle = ?').get(sid, h)?.role || null;
   const count = (sid) => q('SELECT COUNT(*) AS n FROM space_members WHERE sid = ?').get(sid).n;
@@ -268,7 +270,7 @@ CREATE TABLE IF NOT EXISTS space_views (seq INTEGER NOT NULL, viewer TEXT NOT NU
       const bytes = Buffer.byteLength(json);
       // everything this account keeps in large groups and channels, against its plan
       const cap = entitlements(me).storageBytes ?? TIERS.free.storageBytes;
-      const used = q('SELECT COALESCE(SUM(bytes), 0) AS n FROM space_posts WHERE author = ? AND deleted = 0').get(me).n;
+      const used = postBytes(me);
       if (used + bytes > cap) throw err(`storage full for your plan (${Math.round(cap / 1073741824)} GB of posts in large groups and channels); delete old posts to make room`, 413);
       const r = q('INSERT INTO space_posts (sid, id, author, body, at, bytes) VALUES (?, ?, ?, ?, ?, ?)').run(s.id, id, me, json, now(), bytes);
       const p = q('SELECT * FROM space_posts WHERE seq = ?').get(Number(r.lastInsertRowid));
@@ -343,5 +345,5 @@ CREATE TABLE IF NOT EXISTS space_views (seq INTEGER NOT NULL, viewer TEXT NOT NU
     return { space: sum, posts };
   }
 
-  return { ws, ops, publicPreview, space, roleOf, isMember: (sid, h) => Boolean(roleOf(sid, h)), handleTaken: (h) => Boolean(q('SELECT 1 FROM spaces WHERE handle = ?').get(h)) };
+  return { ws, ops, postBytes, publicPreview, space, roleOf, isMember: (sid, h) => Boolean(roleOf(sid, h)), handleTaken: (h) => Boolean(q('SELECT 1 FROM spaces WHERE handle = ?').get(h)) };
 }

@@ -1,0 +1,14 @@
+{
+  "name": "FabriC++",
+  "short_name": "FabriC++",
+  "description": "End-to-end encrypted messages, calls and phone by Infinitum Corporation.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    { "src": "/brand/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/brand/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/brand/fabric-icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

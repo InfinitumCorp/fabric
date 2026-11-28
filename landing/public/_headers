@@ -10,3 +10,10 @@
 /cid/*
   Cache-Control: no-store
   Referrer-Policy: no-referrer
+
+/billing/*
+  Cache-Control: no-store
+  Referrer-Policy: no-referrer
+
+/account*
+  Cache-Control: no-store

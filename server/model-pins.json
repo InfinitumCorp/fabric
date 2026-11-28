@@ -1,0 +1,1061 @@
+{
+  "generated": "2026-11-20",
+  "models": {
+    "Xenova/opus-mt-ar-en": {
+      "revision": "09c7556866400dcc53562ba8d7035119e7d9a2c1",
+      "files": {
+        "config.json": {
+          "sha256": "451ee0da95b01fe58d78f05c47e9ad89f0a17a4c03dcecb389136a12248ef9aa",
+          "size": 1376
+        },
+        "generation_config.json": {
+          "sha256": "6e240dc18d20cceb870d47706c90126a801f246db6009f9e02171795e9f93772",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "cdb25ae736afe9d48035b0ea311ab4b25f315810fab7f3c6f6cb0d8d87af35fa",
+          "size": 59094632
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "d9b0d612acff86cf87634b49bda566d1ef39b312837de549786ea18fecefc708",
+          "size": 51790238
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "86c78b55d2428e4479e21ce4c27266f7c5e1d52bcabcadff29bfda77f6ad3200",
+          "size": 6734647
+        },
+        "tokenizer_config.json": {
+          "sha256": "3d4d5af649635fabf681f0618849ada5b872f72d025d6297896d46ddf5ce3770",
+          "size": 280
+        }
+      }
+    },
+    "Xenova/opus-mt-de-en": {
+      "revision": "399dfd68706739fffd503f876093e455ae268a06",
+      "files": {
+        "config.json": {
+          "sha256": "6754743ec4754957d8552dad869d1314f3af6626b67446ec4cebe5e2fbaa0fc4",
+          "size": 1376
+        },
+        "generation_config.json": {
+          "sha256": "cd16a899388283889c6e87b903c689ce73430aaa18335415f9d9ea770606538e",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "4712800584b2d77c2f9e620bf29523e2b20b62f65ade5011ee01780e2b0ea5d3",
+          "size": 56652404
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "4cedda8f8c89b72a42b3c6cd1e7a27f2de24457093e3bf80cb3e46829641fcd8",
+          "size": 49366942
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "8e0fcf45621ea87fa680c7f9969c37a7f819c1f4c7658a2e6e0879b866a14b17",
+          "size": 5498450
+        },
+        "tokenizer_config.json": {
+          "sha256": "e3687c40400600366d9b073a3fd9f75dc8b40d5a9d6e5c92544cf2e9592abe6c",
+          "size": 280
+        }
+      }
+    },
+    "Xenova/opus-mt-en-ar": {
+      "revision": "034a684356c19021a187cda4d7f823298b913921",
+      "files": {
+        "config.json": {
+          "sha256": "8135d646cd810090349e8833b7ba593ac3b72d632f8858cb34925bdbcb6a1bea",
+          "size": 1389
+        },
+        "generation_config.json": {
+          "sha256": "fb6be7759d385eea2d9f79f767fa80669e9ba74ba02de1db6ec9dbc950cf20f0",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "c0e553b0c26611780c70417c9b4c1ca7169e9cdb18ba9e649197efb017af9f02",
+          "size": 59078120
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "53c354d87ced44b39085fe8a46a25f09ea4578d442dbce9663f3977228f8a04e",
+          "size": 51773854
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "109bb62e1c598287f5960616c869e15be54785a3c2906903dafe044241d50b61",
+          "size": 6748848
+        },
+        "tokenizer_config.json": {
+          "sha256": "2ab016d442c2d3271a04547586a68322e9aedb65097349482d5374fe6d8abde2",
+          "size": 282
+        }
+      }
+    },
+    "Xenova/opus-mt-en-de": {
+      "revision": "1ca130c44c4c5441ef16d48aae521a424ab644f7",
+      "files": {
+        "config.json": {
+          "sha256": "517955ebf66cd6523f9982851dd41771b74fb2d9c00b4933ba2922ac7a63336f",
+          "size": 1411
+        },
+        "generation_config.json": {
+          "sha256": "cd16a899388283889c6e87b903c689ce73430aaa18335415f9d9ea770606538e",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "8b46a825964cdd182fe47cc780f0fb87d357eae1f47cf20aa63c1c09be5b510c",
+          "size": 56652404
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "15834b45fabd2dfb8c6c029b3ca3e7289aeefd90ece798ce42bcf548d1bd3b8d",
+          "size": 49366942
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "8e0fcf45621ea87fa680c7f9969c37a7f819c1f4c7658a2e6e0879b866a14b17",
+          "size": 5498450
+        },
+        "tokenizer_config.json": {
+          "sha256": "4500a1295197174119cf17f9b2e6eab2d5c3a9c64009fb1e37ebd2868bf1161c",
+          "size": 280
+        }
+      }
+    },
+    "Xenova/opus-mt-en-es": {
+      "revision": "4b002a4c7edd54a7ced58877258b87f7efd3f892",
+      "files": {
+        "config.json": {
+          "sha256": "499eae1f97eeba63172fc884f92fd727ae803b7ceb79c0f653aa4b011152af2f",
+          "size": 1468
+        },
+        "generation_config.json": {
+          "sha256": "b743baabb7da4c1a2f19fe558bd6b4c0c7c3b0762fcb5ca7a48fe5a2c2219803",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "58ee5ddd6e22d1693d8722b90c1486afb93700a4376cf28fd74175052ad530ae",
+          "size": 60212804
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "03434edd1147e6c49e22066e9dc5888235e99cc35a6711d1c4ea5b06455d5da9",
+          "size": 52899742
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "285eb29e7155ee48851a77960797813f86a125f70d2c1a124f613f1fbd2b19c3",
+          "size": 6262682
+        },
+        "tokenizer_config.json": {
+          "sha256": "dfb00189b823fb0f15464e9c4e68dd8594f5e5ef5f8dc497468a37741e73aa1f",
+          "size": 282
+        }
+      }
+    },
+    "Xenova/opus-mt-en-fr": {
+      "revision": "28726206f80896b90035bd99cccd5cc1e151f916",
+      "files": {
+        "config.json": {
+          "sha256": "b522b73fcc86f77981349c1df2a2e041eed0dbcbea4acf2635019cf21d51ffc0",
+          "size": 1411
+        },
+        "generation_config.json": {
+          "sha256": "f9a4824ec78c61b4a95afc43bbb6a9545a44ccf1c01d0963a286e799b9e7b256",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "333b244bce16023df04541c8cf9fd60aec9b0569da393c4b831d561897b0bda8",
+          "size": 57381512
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "0a81bdba62f53223740a8c6c6f58e716eba8ea1f92dfa569caf27ed5e3b6a0f7",
+          "size": 50090398
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "8391785c1a2139e7af4678571ccd8dc654ecbb72e4be186940f65d7c604f0246",
+          "size": 5637839
+        },
+        "tokenizer_config.json": {
+          "sha256": "eb8dfaa142fe03627c8d035415f56c46284b6ee4a16e54c6e8236928ac5a1170",
+          "size": 280
+        }
+      }
+    },
+    "Xenova/opus-mt-en-hi": {
+      "revision": "7aad72006a1588a9c3485ed6203aed99eebbc872",
+      "files": {
+        "config.json": {
+          "sha256": "2f7015bbf571018afd1a365d1ade99a648bc89edf3146be93ec0e23cbffd6302",
+          "size": 1389
+        },
+        "generation_config.json": {
+          "sha256": "d5ed4557b625766a952b6840deb40ec48fb7fb7e3a26014fa5f677e78bed0404",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "8baba43a14b15ca4543d30ab36e7d34f2e516fb9af7e0b83b77a5e6a6f66d198",
+          "size": 58638488
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "3045cd6eaf06db96cff853204d6f0ffeb0c5af238a4f5a87a19fcaa94f7493c4",
+          "size": 51337630
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "f493d2d245a353cf9cb3d7f92ef60fd8d65f88efc91d73a1e22ee0f714a68928",
+          "size": 6679560
+        },
+        "tokenizer_config.json": {
+          "sha256": "afb1524d71a7f14b031f41bd0e72c994b48a447c95ac565aba3fdb1f2707ebfe",
+          "size": 282
+        }
+      }
+    },
+    "Xenova/opus-mt-en-id": {
+      "revision": "b3b41f654c2fb3286d007dee1da7b0f47fd27d82",
+      "files": {
+        "config.json": {
+          "sha256": "dc133cd3b445e4af3808fb7bfac9a0424611a10da64b94668f6865b28d4214f4",
+          "size": 1376
+        },
+        "generation_config.json": {
+          "sha256": "d4e0765f12ffef46264dce555b3f5c07d3cefe705cb1f0faef4bf374cb4f47fe",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "0a59ebfe85137a21055d9f73d9f83a59487f0cff31db452c7db3b6cdeca8e7c2",
+          "size": 54947023
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "9bfc9cf0f400f86ec11da24b2f56380fcfabab17fb2dbcf7bb4c1754b7076e24",
+          "size": 47674781
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "a14ba2391d9a1a4be8d6515590d1dcdf548a7701caf2eb431070784f23e06861",
+          "size": 5291338
+        },
+        "tokenizer_config.json": {
+          "sha256": "45b90c0bc4c60090ed9150e7997d339e9d11a7a122cf73ba2a704adcb9603085",
+          "size": 280
+        }
+      }
+    },
+    "Xenova/opus-mt-en-it": {
+      "revision": "075406e3c8c2c30634d4a1bd8f00c21d9e162011",
+      "files": {
+        "config.json": {
+          "sha256": "1cf40ab3aa16e8b6ea7c9766981de1da705a161564c0d5ad187c1e62e5c8ee85",
+          "size": 1376
+        },
+        "generation_config.json": {
+          "sha256": "15a4ad1f54640380c5119641a6a6247862bd32dc982b8170024d9d03eb3831a2",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "f9db146ed7665ea7d437dc4df564e3af5df923366de4d52aaf2c4b4e3e4ae4f1",
+          "size": 67970348
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "b51c5110c7ba356ef01ee400d427afe162e657de1d7a2e9a40deedd811b49e6f",
+          "size": 60597150
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "fb93411d5198eb85753bbd68e9ac24ccb42071003214851b2f37c81f2ea50416",
+          "size": 7904597
+        },
+        "tokenizer_config.json": {
+          "sha256": "39ab5df0b1163bfa8a2728c37a3e81dc14a5ee910dcd33f49d46132f26bc4744",
+          "size": 280
+        }
+      }
+    },
+    "Xenova/opus-mt-en-jap": {
+      "revision": "9d418190be3aa945eae5bab1bd96bc5e349ad784",
+      "files": {
+        "config.json": {
+          "sha256": "4f2efbf2376779f8e2a4cbb55f9eed3a21779d0e5d4a29cba76b30ea302374a2",
+          "size": 1377
+        },
+        "generation_config.json": {
+          "sha256": "d4d2adf80a409e99dae7d7675e1ae2a98ad8d0b4736f42c04cf77be33cdc3e98",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "084c7544b640eeea722b4858328f479d804236b916a2bec761442ff062726619",
+          "size": 50550704
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "4062a86cbec1d388e779294f07b784179d87a648c90771e94879b3a28cd96be7",
+          "size": 43312542
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "240dd3befcfb8727158fb23fbc8a94a41e5b827ad486601ea0805c17fb9f6fd9",
+          "size": 5068572
+        },
+        "tokenizer_config.json": {
+          "sha256": "1842e426ff2ca8fbf91593eac1cc31132344b27225e4329b67ca874bcc407d60",
+          "size": 281
+        }
+      }
+    },
+    "Xenova/opus-mt-en-nl": {
+      "revision": "c3a0541231a7329b4492809fc2bd7ab7d2ceb0bc",
+      "files": {
+        "config.json": {
+          "sha256": "3469caf791a6a038451e418d4254434087c94afc7d9676c03d38b9c64ce258c5",
+          "size": 1376
+        },
+        "generation_config.json": {
+          "sha256": "d22743c9c80fd838a33581944bdbe6f86b1374ec5d851d954430dd3f2d2552d1",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "5f8034fddc4cdcb6fa6c3b64a06e1cd9b1955c0c6dcd13e0e47610ab99ac4a99",
+          "size": 61258735
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "0febb990f8ca8ed9fd3e0017dfcb55ec5293999f20ead81d2bb4370e9e3120ff",
+          "size": 53937565
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "c6b55d9ac70b2a566f0307c6f80d3136fb839ed8e70bb16186324747df58668b",
+          "size": 6433167
+        },
+        "tokenizer_config.json": {
+          "sha256": "75fc8adb60ba4b1d9fd242e0c73e1e38e9571e6822a2601ab78dd917fddaadfe",
+          "size": 280
+        }
+      }
+    },
+    "Xenova/opus-mt-en-ru": {
+      "revision": "e050376e960175e8ddc5cff85025dc8436cddd68",
+      "files": {
+        "config.json": {
+          "sha256": "db16bf0ea7bac239273214c3b9ab44577884227371a9a25e0191b7baf8d6f167",
+          "size": 1376
+        },
+        "generation_config.json": {
+          "sha256": "885345001ac4f978b5e295a04eb6bd6c346ebc7381e30d5b3dd927b178d8a5ef",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "7efefcd793a5663bc204224a92a123524f3dfe2ffad59e5f73d6734d1b11ad04",
+          "size": 58931576
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "97f28d8295d231b7da721ded06fa8c034787df2122cd8f85b904abdc4d15bd53",
+          "size": 51628446
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "981cd3d9fef6bb4dda8082afda716b65deb6717cb3ef35ac0b57002c09dec2bb",
+          "size": 7205388
+        },
+        "tokenizer_config.json": {
+          "sha256": "cafb5494f14bc8d395cc02ddaeeb0f8d85b0d9e20fd48371b5edc104cc2020ba",
+          "size": 280
+        }
+      }
+    },
+    "Xenova/opus-mt-en-sv": {
+      "revision": "33d522d806c041cdebecd549c558d22a2b9b4ea4",
+      "files": {
+        "config.json": {
+          "sha256": "5e2d3cf07dc92aa6c6dd82b9d552a4c1d7ef43f60c5054804ac2e4ee232e552d",
+          "size": 1376
+        },
+        "generation_config.json": {
+          "sha256": "8fed8ec9cfe554d1ecdb910ad34401db8d74e4242eee1881cb35e9414aa81c3b",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "9aa80d76a5c67a89e208367cb0b3315dffbedcc685ce86da0ef9b99442695ee3",
+          "size": 55792232
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "2477c172f2001ee486f2d21e452c4d74838af973dfb58d00cf53632c2e3f3dba",
+          "size": 48513438
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "63498964420ffe2b50435706b4bf7873ea7083103a82dff908b21a6d50a6ebf0",
+          "size": 5450794
+        },
+        "tokenizer_config.json": {
+          "sha256": "e6d2a6283e54807ebb63d1136d8383e8ad5fd1543cd3071fea6d29cc19e037e6",
+          "size": 280
+        }
+      }
+    },
+    "Xenova/opus-mt-en-uk": {
+      "revision": "e6ca587292984b343fd829b6430ed55858496525",
+      "files": {
+        "config.json": {
+          "sha256": "ebc0566353109870e23f338060577d54803ca5d6eb97f1752d53f7402ab92dfb",
+          "size": 1376
+        },
+        "generation_config.json": {
+          "sha256": "7a2d44fec0c90d2131a5d7c7097122a0679c5525d2b43709a26e261784b5b264",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "0892312ea1d359fb749b16deb5005246eb17974bd2b5424344b0e9ae83e0a142",
+          "size": 58451180
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "234c3738c258b3b7c913452a4ab6203b1a24f459355af8ef563dd4d94792d087",
+          "size": 51151774
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "48957126b17d9c51d0331a64da2761a83f359d5b1365d629bb1599ae64269530",
+          "size": 6922026
+        },
+        "tokenizer_config.json": {
+          "sha256": "99508ffbf78bddc5d872e78d93de3905e133c6a68a923730b9402a0ec28ce0c9",
+          "size": 280
+        }
+      }
+    },
+    "Xenova/opus-mt-en-vi": {
+      "revision": "30bcd461c0d7338ad106b36314d3eedc2d4e998c",
+      "files": {
+        "config.json": {
+          "sha256": "0c5ab981c2f5a4878c78522c8a61e3d733f5e3be6b1f83b68bbfb7f00e604637",
+          "size": 1389
+        },
+        "generation_config.json": {
+          "sha256": "621eef69f7a1c7eff4bd5c696a113bd773de03e985f0a382b2c2e21002804dd2",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "1cfc6a84f9c189e6928c9710b281fae3f1f42d4ffbba109e7b4ec8e31ceb06dd",
+          "size": 54373748
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "dfcd7a32be3fdd21cbcf5d354520d626f1768fd6e205ca62a6a11a4641d31f36",
+          "size": 47105950
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "0e8bf67ccde0948009d8fe4254beb6e0df7df2950b627c9e53324a9857789a80",
+          "size": 5163544
+        },
+        "tokenizer_config.json": {
+          "sha256": "51777ca2be47ccea798ad6e1457efbf8fcff1067258b21c6de7f834e1f4fa198",
+          "size": 282
+        }
+      }
+    },
+    "Xenova/opus-mt-en-zh": {
+      "revision": "046f55aec303cdee3e0318604406d4df20f1e8ea",
+      "files": {
+        "config.json": {
+          "sha256": "4727d1229a04f95bf6f39abf949d8080615433d99d6ebd85f81c09edd247d5fa",
+          "size": 1503
+        },
+        "generation_config.json": {
+          "sha256": "b743baabb7da4c1a2f19fe558bd6b4c0c7c3b0762fcb5ca7a48fe5a2c2219803",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "023be4f841f4c47cd65fffcbaa81c0d99d7f7e0138f7ba0e03fa220a4e688aff",
+          "size": 60212804
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "d3b7912bf6a9bd27e4c074c2df91d4ff3d5b4bc5f7f6c8d7cc9c805c98fbafee",
+          "size": 52899742
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "d0c7da27056e8f42adce9e76d8e792e5daa64e15f5acd2e7aabf0121877dd4c1",
+          "size": 6380952
+        },
+        "tokenizer_config.json": {
+          "sha256": "a914596e6bff113a8428d4793b586da87cd0b95697a0e72aba90cc1d95858481",
+          "size": 282
+        }
+      }
+    },
+    "Xenova/opus-mt-es-en": {
+      "revision": "eadfd7c658a9d8929ac3b8e996b68a68e2c7d480",
+      "files": {
+        "config.json": {
+          "sha256": "fab3a7f93185bc5aa7b419f6a1e6e74d98c8f2a506c94493d3019bf46da3478d",
+          "size": 1433
+        },
+        "generation_config.json": {
+          "sha256": "b743baabb7da4c1a2f19fe558bd6b4c0c7c3b0762fcb5ca7a48fe5a2c2219803",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "4cd91ab30240d295ce907b5100826031838c672005e57e524d711122d75605fa",
+          "size": 60212804
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "c01e70f8455efc350831aa2af7ed187b16829241f0018ba07d1ba643a391bc18",
+          "size": 52899742
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "285eb29e7155ee48851a77960797813f86a125f70d2c1a124f613f1fbd2b19c3",
+          "size": 6262682
+        },
+        "tokenizer_config.json": {
+          "sha256": "e1fac15a910169d5b5ec07a13b0374273626a239b5142db10be229ca66cc52a9",
+          "size": 282
+        }
+      }
+    },
+    "Xenova/opus-mt-fr-en": {
+      "revision": "6b166a182780e118c997879d0ad5be4b53671644",
+      "files": {
+        "config.json": {
+          "sha256": "6c2851f154d7b88c7767e4fdcf8a5694a36a456bfa6cbcde1b13fdbade3b56f6",
+          "size": 1411
+        },
+        "generation_config.json": {
+          "sha256": "f9a4824ec78c61b4a95afc43bbb6a9545a44ccf1c01d0963a286e799b9e7b256",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "73bc7ac8e29c42e6f212ebcc29a2991d3646a04aabb642c0036aa54b40e4e1a9",
+          "size": 57381512
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "e727cb26ac6bf816394c49671af69c9ae5798868fed1e40849872415dffc1772",
+          "size": 50090398
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "8391785c1a2139e7af4678571ccd8dc654ecbb72e4be186940f65d7c604f0246",
+          "size": 5637839
+        },
+        "tokenizer_config.json": {
+          "sha256": "bba9e6b1e3b9724d15ebacaf11eaac360c5ae3f4139bcdef0ee1610592eaa3fe",
+          "size": 280
+        }
+      }
+    },
+    "Xenova/opus-mt-hi-en": {
+      "revision": "99853100ed9d932987a6816e8cf7b1b6742a6116",
+      "files": {
+        "config.json": {
+          "sha256": "871af963159a6d00721312fc21782633a389461b6dab23c76cd7c0e68236764d",
+          "size": 1376
+        },
+        "generation_config.json": {
+          "sha256": "be22547557d41d19e39168d15ff37b0ed4accc2c2875f9ab7172df10ac558b95",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "52655659006c8ce742cc761282d49b3be4e73bfbf080f1b6a546aa96170d5813",
+          "size": 58213820
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "dc5a1b084a83019bbb9798809dea5f2d16cc30a9a257238ec93120b3c2892ebf",
+          "size": 50916254
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "bcf130f7fd0c371040618d74b6f19cf252d73c6734443676016302e4b94d78bb",
+          "size": 6578153
+        },
+        "tokenizer_config.json": {
+          "sha256": "c70075dfbc0b9811f62f81f6220eeb7b9733d263018087bf4ddee9d92eb2e14f",
+          "size": 280
+        }
+      }
+    },
+    "Xenova/opus-mt-id-en": {
+      "revision": "c38ef36c843b71177da903442835c3c870975fd6",
+      "files": {
+        "config.json": {
+          "sha256": "e8fe07ea417e891275ce8e44588b34148bc04861be03ed8a3287e34e99e91bf6",
+          "size": 1376
+        },
+        "generation_config.json": {
+          "sha256": "cec8dec2c5df02c7c155b736f459ad5b0cf28072649b77fd8bfe5af918cd370d",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "d65eeab370c2873bdf22a7b2b311f0f636aa693b8edd55c60b6b1db8473268dd",
+          "size": 54947024
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "c5ab889ecf81e120e53f0f39800c0609d8d77b6c4a32212d73a85e3cfeb66293",
+          "size": 47674782
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "a14ba2391d9a1a4be8d6515590d1dcdf548a7701caf2eb431070784f23e06861",
+          "size": 5291338
+        },
+        "tokenizer_config.json": {
+          "sha256": "8e8e398e97233461d3c87cdb5a2a0418ece9bdb542daf379dabb4045315d97cd",
+          "size": 280
+        }
+      }
+    },
+    "Xenova/opus-mt-it-en": {
+      "revision": "fd0b89b9c052adc1f2f64152f555aa17353728be",
+      "files": {
+        "config.json": {
+          "sha256": "4b82a23b7a91b213a934db70d0a33712a739fdd7c5686b02d89642d7dcfc7ac4",
+          "size": 1376
+        },
+        "generation_config.json": {
+          "sha256": "bab9fcae043547da07e13c701f77cf55b6b1517d6f73848c5c4476e7255da512",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "aebc2789cd2ef8062fbda020bac90b61e68458ba98a4c43cea63c1d2310ba2b8",
+          "size": 68147852
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "a025d2d85c90da23880116b67175e43e71921d8d2bf446b9f1eacdc86015aa4c",
+          "size": 60773278
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "c19e1dac8287ec5c5d47a0d81be5e0fd11755666b996c764ef4d13bb8117e3a2",
+          "size": 7942314
+        },
+        "tokenizer_config.json": {
+          "sha256": "b0039f5c755ca180319fc4cd689398a62cd4a67042538158271f199437f0cccd",
+          "size": 280
+        }
+      }
+    },
+    "Xenova/opus-mt-ja-en": {
+      "revision": "1a906cfaaf7c8f4193f67f5885c082aa6dbd9d16",
+      "files": {
+        "config.json": {
+          "sha256": "d35476f1d3858883feec67e5a63ddc387452a70fda9c8e26db99c71aa2ad6a34",
+          "size": 1376
+        },
+        "generation_config.json": {
+          "sha256": "ed1bc2193210ca2a6dc9c144ea789936fed8a27113e01010d8e591f45f238912",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "b304d0014e4e1575437b6af95467b6cb54405d923732d8359113bd6dbbee93c0",
+          "size": 58001744
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "345262b16bcdda1468b0f3380c112b7ce79f731176b4b1d21f6edd5b2ae0d25c",
+          "size": 50705822
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "770ff2855437cf44f1f110550c5a9dca773253a167aeac36076b2073d259aa3b",
+          "size": 5991485
+        },
+        "tokenizer_config.json": {
+          "sha256": "414e9e7e2492b95fa80f24ccb295645d35c4dd0a74d7ef8b89820c0c7e8ec356",
+          "size": 280
+        }
+      }
+    },
+    "Xenova/opus-mt-ko-en": {
+      "revision": "d9fa1ac6008242100fecb4fff9b0a5917a1be81f",
+      "files": {
+        "config.json": {
+          "sha256": "8260080db48141328ae198ede2b25483fa4a6f46dc2859784d6e21c188865e43",
+          "size": 1389
+        },
+        "generation_config.json": {
+          "sha256": "8dc29fef0fe82109f94ef3c2e6ea6bded3215d357b226c34cf7b4630726766c9",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "e131732653a6d3cec42a8b65f8844980042b036bdaca931446bc4b3530bc3506",
+          "size": 60212803
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "210e1d2cb5b457cdeeffe288099cc9d1df9f13c35dc3d39fde4ba252af877380",
+          "size": 52899741
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "147a41edd62b08c79be8cfe6d3102ad19d8a964ac061b4bd6840ac45d0112011",
+          "size": 6487044
+        },
+        "tokenizer_config.json": {
+          "sha256": "3df327b013e1fd1a7c7423a3c521d325cb0e641044f5ced6d2ec44ab811b4f0e",
+          "size": 282
+        }
+      }
+    },
+    "Xenova/opus-mt-nl-en": {
+      "revision": "82c42d95d1508037cbe7172d85fd4e940a2f3584",
+      "files": {
+        "config.json": {
+          "sha256": "e03f36d5475954f1c09b08d0da68d6ea06a051e299a399e740554ed768d2a99c",
+          "size": 1376
+        },
+        "generation_config.json": {
+          "sha256": "b11b1ae60dbb7656d021197a8883e81004dbdb74652df9d113f2efe2ca0dd974",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "ad4df9a08f16952c0d9ee06807f54d62fcd07a9109c2c0b8ea05a4422d7bf4d7",
+          "size": 61258736
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "7b8b1e9071bed8e2394e3bd2f65b952700b1dd1293d087141134c8bac018653b",
+          "size": 53937566
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "c6b55d9ac70b2a566f0307c6f80d3136fb839ed8e70bb16186324747df58668b",
+          "size": 6433167
+        },
+        "tokenizer_config.json": {
+          "sha256": "7e7b5a6712709169fe3bcd7fe1bfb851310e09b4ef70a7e39b176de30e420657",
+          "size": 280
+        }
+      }
+    },
+    "Xenova/opus-mt-pl-en": {
+      "revision": "aeaf0e003b045248c28a559a5ce6027b54ebdaba",
+      "files": {
+        "config.json": {
+          "sha256": "98ccffdad4d25169e4621b05b70824b93855fcc1ac9e917a6faef0ead4d6c799",
+          "size": 1376
+        },
+        "generation_config.json": {
+          "sha256": "58d0f9d875ca857930d2e8425c7dd093eef4799d56e6ca94bc067650d001248d",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "9ad9da5bce473ca06a9b0a3dbf0793675827e5668ab501e5dc65dac8cecd93ba",
+          "size": 59402168
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "2416eb3c6db52a2d116539bf673b596e6a3d1453153b17778e85c9f55249c832",
+          "size": 52095390
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "788e7e69a1dcb862ced197e440581bfcb672b37173dd0c5ff55649c7c8394f74",
+          "size": 6118576
+        },
+        "tokenizer_config.json": {
+          "sha256": "d29a00bce5fa370984ef9bd8c612625b90d9a4843cffd27c067fde320080dfe0",
+          "size": 280
+        }
+      }
+    },
+    "Xenova/opus-mt-ru-en": {
+      "revision": "afe8c6c738ec81b6d033fd8f44f9678a639a7c67",
+      "files": {
+        "config.json": {
+          "sha256": "60dc7d0906dbe42a1d740cdd7e84ce1534685b81fbe16005a0301adac69086ce",
+          "size": 1376
+        },
+        "generation_config.json": {
+          "sha256": "9bcb507fa6117b07870df6627294b878b0710a55bc3abc9cf0db980e0c48fe2c",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "25e7ff97b201bce64ab9c39749761d657b70b8602bcbc1ce01c67f713e90ffdf",
+          "size": 58931576
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "c10df0466540534bb70c4402d539c349b8bfa9968184cad89f51408cf13e7eb7",
+          "size": 51628446
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "981cd3d9fef6bb4dda8082afda716b65deb6717cb3ef35ac0b57002c09dec2bb",
+          "size": 7205388
+        },
+        "tokenizer_config.json": {
+          "sha256": "c0710ba5ee70ccb2d0e6b0092139d00f370b9c4783c4b077584cb3cc8f7ac4e0",
+          "size": 280
+        }
+      }
+    },
+    "Xenova/opus-mt-sv-en": {
+      "revision": "63a40256869b6a2b29a84e47aa7f03524fa5f3a2",
+      "files": {
+        "config.json": {
+          "sha256": "dfcd75781057f34a0fe027f3c85336b88b8a0c9ae788575bb8057281872623d5",
+          "size": 1376
+        },
+        "generation_config.json": {
+          "sha256": "d23b5d0f0db412f5034e879bc454b8dafc2390bc06b3c6ec5acb54d54634067b",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "29973afcd575cc61d17133d432fa1a81d8ba1f4b717b247384c2eb11342a472d",
+          "size": 55792232
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "07ae6446ef6520117da869986e396ee55b05c471124ff851399701253fb306cc",
+          "size": 48513438
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "63498964420ffe2b50435706b4bf7873ea7083103a82dff908b21a6d50a6ebf0",
+          "size": 5450794
+        },
+        "tokenizer_config.json": {
+          "sha256": "e982871087cf02c3c3765a5747b48e0d4e3fa31c17cb52c45cb74819eb239bb2",
+          "size": 280
+        }
+      }
+    },
+    "Xenova/opus-mt-tr-en": {
+      "revision": "78247f41f354af036d24e6f0f8a3d02c6806f96e",
+      "files": {
+        "config.json": {
+          "sha256": "c7997f0312362bd4b67b8f5184dd0ce9a09a8c6bfe76bddd1f7c5d1c58966fe0",
+          "size": 1376
+        },
+        "generation_config.json": {
+          "sha256": "606d03551f5442faaf22ebb638b10ddd7210c40cd13cb4d2193b9e4e874b3df3",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "b32325078cf0370f3741a2b22f2bc11a94e219c6ecc56a27eaee1e0f40e24b04",
+          "size": 58865012
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "b9b73903b99de7303f3c465b335a9cb695ba6c9c93ef527064f5fe2cf7a3235f",
+          "size": 51562398
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "1aef432629956f2df4e06b2c7e703daaddcaf0c23ab45c7bfd5d253be954f32f",
+          "size": 6123578
+        },
+        "tokenizer_config.json": {
+          "sha256": "73ced36b78140c779b6d98143e72b5cefbc4cc423acd5a5554d84e4f766132dc",
+          "size": 280
+        }
+      }
+    },
+    "Xenova/opus-mt-uk-en": {
+      "revision": "b2ad6afa424aaeff8913ff350860b7a7b7c0a607",
+      "files": {
+        "config.json": {
+          "sha256": "40aceb41a0b2d5822100b08cf6b80f13a246e1104ec4bdf0904d62661b75063a",
+          "size": 1376
+        },
+        "generation_config.json": {
+          "sha256": "9a6f914ef5d416c657006f95d60d09acea0b804cf428ac802f4ce80bc89ae369",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "ffa6d28d5fa0ff4ed930969d9ca4bac2d80ff11172198e93dc6332db49ddb36b",
+          "size": 58451180
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "5e8c4c7e88742efa0a8e013f3897f17e29357d54b8c86a13472669546d6ed561",
+          "size": 51151774
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "48957126b17d9c51d0331a64da2761a83f359d5b1365d629bb1599ae64269530",
+          "size": 6922026
+        },
+        "tokenizer_config.json": {
+          "sha256": "00457d284068498f364aae9ad88ea377f3fc28cb11a27f5847af56704b88df81",
+          "size": 280
+        }
+      }
+    },
+    "Xenova/opus-mt-vi-en": {
+      "revision": "541dfd72ec07e8f1563795e0224408ad8d729e80",
+      "files": {
+        "config.json": {
+          "sha256": "c62a203a0183755af37b96a33cc125e7f74f97c1e90aaae1d1f404fd8a42eea8",
+          "size": 1389
+        },
+        "generation_config.json": {
+          "sha256": "44f2c9011a9087c5ec93a1671066a4a59a7a8c00c03e84a6ecac0d840926566b",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "540edbcc08bab0b42c03576a759fd9b4d5fc99996ac3178630733916dc2325cb",
+          "size": 54401611
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "fa7bd78e8bed6bdc03728f62f1592c4bb52d9e12795496604c1e990e102abdb2",
+          "size": 47133597
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "c41cc5afd26c053770b60e1031577bb7a8e2f3c2eeacde2a34f5c15abfd4eafd",
+          "size": 5169708
+        },
+        "tokenizer_config.json": {
+          "sha256": "0221122d916f6f230d6b1967644457745aa01514e054897f62b8c6b419460ceb",
+          "size": 282
+        }
+      }
+    },
+    "Xenova/opus-mt-zh-en": {
+      "revision": "39d480d52a9ea3065a1f117adfe4dbc55de10e6f",
+      "files": {
+        "config.json": {
+          "sha256": "293d318fce41dbf04114eac45037bb88a32d7c4ee21011a75e24a8b98ca45ad1",
+          "size": 1389
+        },
+        "generation_config.json": {
+          "sha256": "8dc29fef0fe82109f94ef3c2e6ea6bded3215d357b226c34cf7b4630726766c9",
+          "size": 293
+        },
+        "onnx/decoder_model_merged_quantized.onnx": {
+          "sha256": "c6b7f04ff1ba0fbd1bf6852599b4c0cad6fe512d57cd887f44ef36cf705424cb",
+          "size": 60212804
+        },
+        "onnx/encoder_model_quantized.onnx": {
+          "sha256": "84d5e171b626bc8b6b220d022ac58696e9528c25deeacca62b5cbf4364547a99",
+          "size": 52899742
+        },
+        "special_tokens_map.json": {
+          "sha256": "5e4d1f5e759d74cb1c2fe1d165cfc62b5237aa904de759380cd6f43042eec723",
+          "size": 74
+        },
+        "tokenizer.json": {
+          "sha256": "b306d0301cf280bfd647d7067b5ade2a97b987e6d678df110703c002433643ff",
+          "size": 6381339
+        },
+        "tokenizer_config.json": {
+          "sha256": "08849acc0a539c4749d8665e9d6217735503a97871ccebeea8a762d5fba1acf7",
+          "size": 282
+        }
+      }
+    },
+    "onnx-community/Qwen2.5-0.5B-Instruct": {
+      "revision": "22942cb7d7ba4cc81bb4673549ca4d4614469b5e",
+      "files": {
+        "config.json": {
+          "sha256": "777e01f0fbb3346eb229cb6fb278ed6533c1e4dcb9ebf4bed0f6e94ef17fa1b5",
+          "size": 678
+        },
+        "generation_config.json": {
+          "sha256": "f7e7ce458658b2d40d9eb213b91b77a8bf698845ab89360976722d7ac46928a3",
+          "size": 242
+        },
+        "onnx/model_q4f16.onnx": {
+          "sha256": "b11c1dd99efd57e6c6e5bc4443a019931a5fbd5dd500d48644d8225f5ce0b2cb",
+          "size": 483003582
+        },
+        "onnx/model_quantized.onnx": {
+          "sha256": "41834041ab1b29eff9fc592f1a29a1844133aea35832ea9fa91682be13016100",
+          "size": 512096557
+        },
+        "special_tokens_map.json": {
+          "sha256": "76862e765266b85aa9459767e33cbaf13970f327a0e88d1c65846c2ddd3a1ecd",
+          "size": 613
+        },
+        "tokenizer.json": {
+          "sha256": "a8506e7111b80c6d8635951a02eab0f4e1a8e4e5772da83846579e97b16f61bf",
+          "size": 7031673
+        },
+        "tokenizer_config.json": {
+          "sha256": "6a14243f0ae04884e597b3f032c05e15de9f417318fdcac24ab4e2680e691430",
+          "size": 7849
+        }
+      }
+    }
+  }
+}
